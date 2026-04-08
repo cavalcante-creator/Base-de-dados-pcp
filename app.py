@@ -1,3 +1,55 @@
+# ==========================================================
+# PREVISÃO
+# ==========================================================
+
+if pagina == "Upload Previsão Produção":
+
+    st.title("📅 Previsão Produção")
+
+    file = st.file_uploader("Excel Previsão", type=["xlsx"])
+
+    if file:
+
+        df_raw = pd.read_excel(file, header=None, engine="openpyxl")
+
+        linha_header = None
+        for i in range(len(df_raw)):
+            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
+                linha_header = i
+                break
+
+        file.seek(0)
+
+        df = pd.read_excel(file, header=linha_header, engine="openpyxl")
+        df.columns = df.columns.astype(str).str.upper()
+
+        col_cod = [c for c in df.columns if "COD" in c][0]
+        col_prod = [c for c in df.columns if "PROD" in c][0]
+        col_prev = [c for c in df.columns if "PREVIS" in c][0]
+
+        df = df[[col_cod, col_prod, col_prev]]
+        df.columns = ["COD", "PRODUTO", "PREVISAO"]
+
+        df["PREVISAO"] = pd.to_numeric(df["PREVISAO"], errors="coerce").fillna(0)
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        arquivo = "previsao.csv"
+
+        if os.path.exists(arquivo):
+            df_antigo = pd.read_csv(arquivo)
+            df = pd.concat([df_antigo, df], ignore_index=True)
+
+        df.to_csv(arquivo, index=False)
+
+        st.success("Previsão carregada!")
+        st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# PARÂMETROS
+# ==========================================================
+
 if pagina == "Upload Parâmetros":
 
     st.title("⚙️ Parâmetros Produção")
@@ -89,3 +141,47 @@ if pagina == "Upload Parâmetros":
 
                 st.success("Parâmetros carregados!")
                 st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# GERAR EXCEL
+# ==========================================================
+
+if pagina == "Gerar Excel":
+
+    st.title("📥 Gerar Excel")
+
+    arquivos = {
+        "Saldo": "saldo.csv",
+        "Perfil": "perfil.csv",
+        "Ordens": "ordens.csv",
+        "Previsão": "previsao.csv",
+        "Parâmetros": "parametros.csv"
+    }
+
+    for nome, arquivo in arquivos.items():
+
+        if os.path.exists(arquivo):
+
+            df = pd.read_csv(arquivo)
+
+            if "Data Processamento" in df.columns:
+                df = df.sort_values(
+                    by=["Data Processamento", "Hora Processamento"],
+                    ascending=False
+                )
+
+            st.subheader(nome)
+            st.dataframe(df, use_container_width=True)
+
+            if st.button(f"Gerar Excel {nome}"):
+
+                nome_excel = f"{nome}_{agora().strftime('%H-%M-%S')}.xlsx"
+
+                df.to_excel(nome_excel, index=False)
+
+                with open(nome_excel, "rb") as f:
+                    st.download_button(
+                        f"📥 Baixar {nome}",
+                        f,
+                        file_name=nome_excel
+                    )
