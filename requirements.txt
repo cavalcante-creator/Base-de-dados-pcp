@@ -1,5 +1,6 @@
-📦 requirements.txt
 streamlit
+pdfplumber
 pandas
 openpyxl
 xlrd
+pytz
