@@ -26,6 +26,7 @@ pagina = st.sidebar.radio(
         "Upload Perfil Produção",
         "Upload Ordens de Fabricação",
         "Upload Previsão Produção",
+        "Upload Parâmetros",
         "Gerar Excel"
     ]
 )
@@ -257,7 +258,76 @@ if pagina == "Upload Previsão Produção":
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# GERAR EXCEL (COM HISTÓRICO)
+# PARÂMETROS
+# ==========================================================
+
+if pagina == "Upload Parâmetros":
+
+    st.title("⚙️ Parâmetros Produção")
+
+    file = st.file_uploader("Excel Parâmetros", type=["xls", "xlsx"])
+
+    if file:
+
+        df_raw = pd.read_excel(file, header=None)
+
+        linha_header = None
+        for i in range(len(df_raw)):
+            if "COD ITEM" in df_raw.iloc[i].astype(str).str.upper().values:
+                linha_header = i
+                break
+
+        df = pd.read_excel(file, header=linha_header)
+        df.columns = df.columns.astype(str).str.upper().str.strip()
+
+        df = df[
+            [
+                "COD ITEM",
+                "DESC TECNICA",
+                "UM",
+                "LOTE MIN",
+                "LOTE MAX",
+                "LOTE MULT",
+                "ESTQ SEG",
+                "TEMP REP",
+                "TEMP SEG",
+                "AGRUP",
+                "PLANEJADOR",
+                "CONS MEDIO"
+            ]
+        ]
+
+        df.columns = [
+            "COD ITEM",
+            "DESCRICAO",
+            "UM",
+            "LOTE MIN",
+            "LOTE MAX",
+            "LOTE MULT",
+            "ESTOQUE SEGURANCA",
+            "TEMPO REPOSICAO",
+            "TEMPO SEGURANCA",
+            "AGRUPAMENTO",
+            "PLANEJADOR",
+            "CONSUMO MEDIO"
+        ]
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        arquivo = "parametros.csv"
+
+        if os.path.exists(arquivo):
+            df_antigo = pd.read_csv(arquivo)
+            df = pd.concat([df_antigo, df], ignore_index=True)
+
+        df.to_csv(arquivo, index=False)
+
+        st.success("Parâmetros carregados!")
+        st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# GERAR EXCEL
 # ==========================================================
 
 if pagina == "Gerar Excel":
@@ -268,7 +338,8 @@ if pagina == "Gerar Excel":
         "Saldo": "saldo.csv",
         "Perfil": "perfil.csv",
         "Ordens": "ordens.csv",
-        "Previsão": "previsao.csv"
+        "Previsão": "previsao.csv",
+        "Parâmetros": "parametros.csv"
     }
 
     for nome, arquivo in arquivos.items():
