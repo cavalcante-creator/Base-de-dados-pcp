@@ -24,6 +24,7 @@ pagina = st.sidebar.radio(
     [
         "Upload Ordens de Fabricação",
         "Upload Previsão Produção",
+        "Upload Perfil e Saldos",
         "Upload Parâmetros",
         "Gerar Excel"
     ]
@@ -60,6 +61,88 @@ if pagina == "Upload Previsão Produção":
 
     if arquivo_prev:
         st.success("Arquivo de previsão carregado com sucesso!")
+
+# ==========================================================
+# UPLOAD PERFIL E SALDOS
+# ==========================================================
+
+if pagina == "Upload Perfil e Saldos":
+
+    st.title("📋 Upload Perfil de Itens / Saldos")
+
+    arquivo_saldos = st.file_uploader(
+        "Selecione o arquivo de Perfil de Itens",
+        type=["xlsx", "xls", "csv"]
+    )
+
+    if arquivo_saldos:
+
+        try:
+
+            if arquivo_saldos.name.endswith(".csv"):
+                df_saldos = pd.read_csv(arquivo_saldos)
+
+            else:
+                try:
+                    arquivo_saldos.seek(0)
+                    df_saldos = pd.read_excel(
+                        arquivo_saldos,
+                        engine="openpyxl"
+                    )
+                except:
+                    arquivo_saldos.seek(0)
+                    df_saldos = pd.read_excel(
+                        arquivo_saldos,
+                        engine="xlrd"
+                    )
+
+            df_saldos.columns = (
+                df_saldos.columns
+                .astype(str)
+                .str.upper()
+                .str.strip()
+            )
+
+            colunas_saldo = [
+                "CODIGO",
+                "DESCRICAO",
+                "SALDO ALMOX 1",
+                "SALDO ALMOX 2",
+                "SALDO ALMOX 3",
+                "SALDO ALMOX 4",
+                "SALDO TOTAL"
+            ]
+
+            colunas_existentes = [
+                c for c in colunas_saldo if c in df_saldos.columns
+            ]
+
+            if len(colunas_existentes) == 0:
+                st.error("Nenhuma coluna de saldo encontrada.")
+
+            else:
+
+                df_saldos = df_saldos[colunas_existentes]
+
+                df_saldos["Data Processamento"] = agora().strftime("%d/%m/%Y")
+                df_saldos["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+                arquivo_csv = "saldos.csv"
+
+                if os.path.exists(arquivo_csv):
+                    df_antigo = pd.read_csv(arquivo_csv)
+                    df_saldos = pd.concat(
+                        [df_antigo, df_saldos],
+                        ignore_index=True
+                    )
+
+                df_saldos.to_csv(arquivo_csv, index=False)
+
+                st.success("Saldos carregados com sucesso!")
+                st.dataframe(df_saldos, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo: {e}")
 
 # ==========================================================
 # UPLOAD PARÂMETROS
@@ -187,6 +270,7 @@ if pagina == "Gerar Excel":
     if os.path.exists("parametros.csv"):
         df_parametros = pd.read_csv("parametros.csv")
 
+        st.subheader("Parâmetros")
         st.dataframe(df_parametros, use_container_width=True)
 
         st.download_button(
@@ -195,5 +279,19 @@ if pagina == "Gerar Excel":
             file_name="parametros_exportados.csv",
             mime="text/csv"
         )
-    else:
-        st.warning("Nenhum arquivo de parâmetros foi carregado ainda.")
+
+    if os.path.exists("saldos.csv"):
+        df_saldos = pd.read_csv("saldos.csv")
+
+        st.subheader("Saldos")
+        st.dataframe(df_saldos, use_container_width=True)
+
+        st.download_button(
+            label="Baixar Saldos CSV",
+            data=df_saldos.to_csv(index=False).encode("utf-8"),
+            file_name="saldos_exportados.csv",
+            mime="text/csv"
+        )
+
+    if not os.path.exists("parametros.csv") and not os.path.exists("saldos.csv"):
+        st.warning("Nenhum arquivo foi carregado ainda.")
