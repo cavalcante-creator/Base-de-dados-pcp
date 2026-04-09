@@ -152,7 +152,7 @@ with abas[2]:
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# PREVISÃO
+# PREVISÃO (INTELIGENTE)
 # ==========================================================
 with abas[3]:
     st.title("📅 Previsão")
@@ -160,18 +160,25 @@ with abas[3]:
     file = st.file_uploader("Excel Previsão", type=["xlsx"])
 
     if file:
-        df = pd.read_excel(file)
-        df.columns = df.columns.str.upper()
 
-        col_cod_list = [c for c in df.columns if "COD" in c]
-        col_prod_list = [c for c in df.columns if "PROD" in c]
+        df_raw = pd.read_excel(file, header=None)
 
-        if not col_cod_list or not col_prod_list:
-            st.error(f"❌ Colunas não encontradas no arquivo. Colunas disponíveis: {list(df.columns)}")
+        linha_header = None
+        for i in range(len(df_raw)):
+            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
+                linha_header = i
+                break
+
+        if linha_header is None:
+            st.error("❌ Não foi possível localizar a linha de cabeçalho.")
             st.stop()
 
-        col_cod = col_cod_list[0]
-        col_prod = col_prod_list[0]
+        df = pd.read_excel(file, header=linha_header)
+
+        df.columns = df.columns.astype(str).str.upper().str.strip()
+
+        col_cod = [c for c in df.columns if "COD" in c][0]
+        col_prod = [c for c in df.columns if "PROD" in c][0]
 
         df = df[[col_cod, col_prod]]
         df.columns = ["COD", "PRODUTO"]
