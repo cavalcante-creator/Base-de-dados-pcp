@@ -9,33 +9,27 @@ import pytz
 
 st.set_page_config(page_title="PCP Produção", layout="wide")
 
-# FUSO BRASIL
 fuso = pytz.timezone("America/Sao_Paulo")
 
 def agora():
     return datetime.now(fuso)
 
 # ==========================================================
-# MENU
+# ABAS
 # ==========================================================
-pagina = st.sidebar.radio(
-    "Menu",
-    [
-        "Upload Saldo Produção",
-        "Upload Perfil Produção",
-        "Upload Ordens de Fabricação",
-        "Upload Previsão Produção",
-        "Gerar Excel",
-        "📊 Análise PCP"
-    ]
-)
+abas = st.tabs([
+    "📦 Saldo",
+    "📊 Perfil",
+    "📄 Ordens",
+    "📅 Previsão",
+    "📊 Análise PCP"
+])
 
 # ==========================================================
 # SALDO
 # ==========================================================
-if pagina == "Upload Saldo Produção":
+with abas[0]:
     st.title("📦 Saldo Produção")
-    st.caption(f"📅 {agora().strftime('%d/%m/%Y')} | ⏰ {agora().strftime('%H:%M:%S')}")
 
     file = st.file_uploader("PDF Saldo", type=["pdf"])
 
@@ -60,37 +54,24 @@ if pagina == "Upload Saldo Produção":
                 if not linha:
                     continue
 
-                linha_upper = linha.upper()
-
                 codigo_match = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
 
                 if codigo_match:
                     codigo_atual = codigo_match.group(1)
-                    descricao = linha.split(codigo_atual, 1)[1].strip()
-                    descricao = re.split(r'\s+\d+[.,]?\d*|\s+UN\b|\s+KG\b', descricao)[0].strip()
-
                     if codigo_atual not in dados:
                         dados[codigo_atual] = {
                             "Codigo": codigo_atual,
-                            "Descricao": descricao,
-                            "Saldo Total": 0
+                            "Saldo Total": 0,
+                            "Saldo Almox 3": 0
                         }
                     continue
 
-                if "ALMOXARIFADO" in linha_upper and codigo_atual:
-                    almox_match = re.search(r'ALMOXARIFADO[:\s]+(\d+)', linha_upper)
-                    if almox_match:
-                        numero = almox_match.group(1)
-                        col = f"Saldo Almox {numero}"
-
-                        if col not in dados[codigo_atual]:
-                            dados[codigo_atual][col] = 0
-
-                        nums = re.findall(r'[\d\.]+\,\d+', linha)
-                        if nums:
-                            valor = float(nums[-1].replace(".", "").replace(",", "."))
-                            dados[codigo_atual][col] += valor
-                            dados[codigo_atual]["Saldo Total"] += valor
+                if "ALMOXARIFADO" in linha.upper() and codigo_atual:
+                    nums = re.findall(r'[\d\.]+\,\d+', linha)
+                    if nums:
+                        valor = float(nums[-1].replace(".", "").replace(",", "."))
+                        dados[codigo_atual]["Saldo Total"] += valor
+                        dados[codigo_atual]["Saldo Almox 3"] = valor
 
             df = pd.DataFrame(dados.values())
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
@@ -99,14 +80,13 @@ if pagina == "Upload Saldo Produção":
             df.to_csv("saldo.csv", index=False)
 
             st.success("Saldo processado!")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df)
 
 # ==========================================================
 # PERFIL
 # ==========================================================
-if pagina == "Upload Perfil Produção":
+with abas[1]:
     st.title("📊 Perfil Produção")
-    st.caption(f"📅 {agora().strftime('%d/%m/%Y')} | ⏰ {agora().strftime('%H:%M:%S')}")
 
     file = st.file_uploader("PDF Perfil", type=["pdf"])
 
@@ -116,15 +96,11 @@ if pagina == "Upload Perfil Produção":
 
         if st.button("Processar Perfil"):
 
-            def extrair_numero(texto):
-                m = re.search(r'-?[\d,.]+', str(texto))
-                return m.group(0) if m else "0"
-
             movimentacoes = []
             codigo_item = ""
 
             regex = re.compile(
-                r'(DD|DC|DP|OFP|OFA).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+).*?(-?[\d,.]+)'
+                r'(DD|DC|DP).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+)'
             )
 
             with pdfplumber.open("perfil_temp.pdf") as pdf:
@@ -142,8 +118,7 @@ if pagina == "Upload Perfil Produção":
                                     "Item": codigo_item,
                                     "Tipo": mov.group(1),
                                     "Data Fim": mov.group(2),
-                                    "Quantidade": extrair_numero(mov.group(3)),
-                                    "Estoque Projetado": extrair_numero(mov.group(4))
+                                    "Quantidade": mov.group(3)
                                 })
 
             df = pd.DataFrame(movimentacoes)
@@ -153,13 +128,13 @@ if pagina == "Upload Perfil Produção":
             df.to_csv("perfil.csv", index=False)
 
             st.success("Perfil processado!")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df)
 
 # ==========================================================
 # ORDENS
 # ==========================================================
-if pagina == "Upload Ordens de Fabricação":
-    st.title("📄 Ordens de Fabricação")
+with abas[2]:
+    st.title("📄 Ordens")
 
     file = st.file_uploader("CSV Ordens", type=["csv"])
 
@@ -173,36 +148,25 @@ if pagina == "Upload Ordens de Fabricação":
         df.to_csv("ordens.csv", index=False)
 
         st.success("Ordens carregadas!")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df)
 
 # ==========================================================
 # PREVISÃO
 # ==========================================================
-if pagina == "Upload Previsão Produção":
-    st.title("📅 Previsão Produção")
+with abas[3]:
+    st.title("📅 Previsão")
 
     file = st.file_uploader("Excel Previsão", type=["xlsx"])
 
     if file:
-        df_raw = pd.read_excel(file, header=None)
-
-        linha_header = None
-        for i in range(len(df_raw)):
-            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
-                linha_header = i
-                break
-
-        df = pd.read_excel(file, header=linha_header)
-        df.columns = df.columns.astype(str).str.upper()
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.upper()
 
         col_cod = [c for c in df.columns if "COD" in c][0]
         col_prod = [c for c in df.columns if "PROD" in c][0]
-        col_prev = [c for c in df.columns if "PREVIS" in c][0]
 
-        df = df[[col_cod, col_prod, col_prev]]
-        df.columns = ["COD", "PRODUTO", "PREVISAO"]
-
-        df["PREVISAO"] = pd.to_numeric(df["PREVISAO"], errors="coerce").fillna(0)
+        df = df[[col_cod, col_prod]]
+        df.columns = ["COD", "PRODUTO"]
 
         df["Data Processamento"] = agora().strftime("%d/%m/%Y")
         df["Hora Processamento"] = agora().strftime("%H:%M:%S")
@@ -210,12 +174,12 @@ if pagina == "Upload Previsão Produção":
         df.to_csv("previsao.csv", index=False)
 
         st.success("Previsão carregada!")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df)
 
 # ==========================================================
 # ANALISE PCP
 # ==========================================================
-if pagina == "📊 Análise PCP":
+with abas[4]:
     st.title("📊 Análise PCP")
 
     try:
@@ -223,25 +187,14 @@ if pagina == "📊 Análise PCP":
         perfil = pd.read_csv("perfil.csv")
         previsao = pd.read_csv("previsao.csv")
     except:
-        st.warning("⚠️ Carregue todos os dados primeiro.")
+        st.warning("⚠️ Faça upload dos dados primeiro.")
         st.stop()
 
-    # ULTIMO UPLOAD
-    saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
-        .drop_duplicates(subset=["Codigo"])
-
-    perfil = perfil.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)
-
-    previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
-        .drop_duplicates(subset=["COD"])
-
-    # BASE
     base = previsao[["COD", "PRODUTO"]].copy()
     base.columns = ["Codigo", "Descricao"]
 
     saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
 
-    # TRATAR PERFIL
     perfil["Quantidade"] = (
         perfil["Quantidade"]
         .astype(str)
@@ -258,74 +211,40 @@ if pagina == "📊 Análise PCP":
         perfil["Data Fim"].dt.year.astype(str)
     )
 
-    semana_atual = datetime.now().isocalendar()[1]
-    ano_atual = datetime.now().year
-    ref_atual = str(semana_atual).zfill(2) + "." + str(ano_atual)
+    semana = datetime.now().isocalendar()[1]
+    ano = datetime.now().year
+    ref = str(semana).zfill(2) + "." + str(ano)
 
-    # DEMANDAS
-    demanda_dc = perfil[perfil["Tipo"] == "DC"]\
-        .groupby("Item")["Quantidade"].sum().reset_index()
-    demanda_dc.columns = ["Codigo", "Demanda Pedido"]
+    dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
+    dc.columns = ["Codigo", "Demanda Pedido"]
 
-    demanda_dp = perfil[perfil["Tipo"] == "DP"]\
-        .groupby("Item")["Quantidade"].sum().reset_index()
-    demanda_dp.columns = ["Codigo", "Demanda DP"]
+    dp = perfil[perfil["Tipo"] == "DP"].groupby("Item")["Quantidade"].sum().reset_index()
+    dp.columns = ["Codigo", "Demanda DP"]
 
-    demanda_dp_semana = perfil[
+    dp_sem = perfil[
         (perfil["Tipo"] == "DP") &
-        (perfil["Referencia"] == ref_atual)
+        (perfil["Referencia"] == ref)
     ].groupby("Item")["Quantidade"].sum().reset_index()
-    demanda_dp_semana.columns = ["Codigo", "DP Semana Atual"]
 
-    # MERGE
+    dp_sem.columns = ["Codigo", "DP Semana Atual"]
+
     df = base.merge(saldo_base, on="Codigo", how="left")
-    df = df.merge(demanda_dc, on="Codigo", how="left")
-    df = df.merge(demanda_dp, on="Codigo", how="left")
-    df = df.merge(demanda_dp_semana, on="Codigo", how="left")
+    df = df.merge(dc, on="Codigo", how="left")
+    df = df.merge(dp, on="Codigo", how="left")
+    df = df.merge(dp_sem, on="Codigo", how="left")
 
     df = df.fillna(0)
 
-    # STATUS
     df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
     def status(row):
         if row["Saldo vs Demanda"] < 0:
-            return "⛔ FALTA"
+            return "🔴 FALTA"
         elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
-            return "⚠️ RISCO"
+            return "🟡 RISCO"
         else:
-            return "✅ OK"
+            return "🟢 OK"
 
     df["Status"] = df.apply(status, axis=1)
 
-    def emoji(val):
-        if "OK" in val:
-            return "🟢 " + val
-        elif "RISCO" in val:
-            return "🟡 " + val
-        else:
-            return "🔴 " + val
-
-    df["Status"] = df["Status"].apply(emoji)
-
-    # CARDS
-    col1, col2, col3 = st.columns(3)
-    col1.metric("FALTA", len(df[df["Status"].str.contains("FALTA")]))
-    col2.metric("RISCO", len(df[df["Status"].str.contains("RISCO")]))
-    col3.metric("OK", len(df[df["Status"].str.contains("OK")]))
-
-    st.divider()
-
-    # TABELA
-    tabela = df[[
-        "Codigo",
-        "Descricao",
-        "Saldo Total",
-        "Saldo Almox 3",
-        "Demanda Pedido",
-        "Demanda DP",
-        "DP Semana Atual",
-        "Status"
-    ]]
-
-    st.dataframe(tabela, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
