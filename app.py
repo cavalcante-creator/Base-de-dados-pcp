@@ -271,3 +271,175 @@ if pagina == "Gerar Excel":
                         f,
                         file_name=nome_excel
                     )
+                    # ==========================================================
+# DASHBOARD PCP (IGUAL POWER BI)
+# ==========================================================
+if pagina == "📊 Dashboard PCP":
+    st.title("📊 Monitoramento PCP")
+    st.caption(f"📅 {agora().strftime('%d/%m/%Y')} | ⏰ {agora().strftime('%H:%M:%S')}")
+
+    # =========================
+    # CARREGAR DADOS
+    # =========================
+    try:
+        saldo = pd.read_csv("saldo.csv")
+        perfil = pd.read_csv("perfil.csv")
+    except:
+        st.warning("⚠️ Carregue os dados primeiro nas outras abas.")
+        st.stop()
+
+    # =========================
+    # TRATAMENTO
+    # =========================
+    perfil["Quantidade"] = (
+        perfil["Quantidade"]
+        .astype(str)
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+        .astype(float)
+    )
+
+    perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True, errors="coerce")
+
+    # REFERÊNCIA (SEMANA.ANO)
+    perfil["Referência"] = (
+        perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
+        + "." +
+        perfil["Data Fim"].dt.year.astype(str)
+    )
+
+    # =========================
+    # MEDIDAS (IGUAL DAX)
+    # =========================
+
+    # DEMANDA DC
+    demanda_dc = perfil[perfil["Tipo"] == "DC"] \
+        .groupby("Item")["Quantidade"].sum().reset_index()
+
+    # DEMANDA DP TOTAL
+    demanda_dp = perfil[perfil["Tipo"] == "DP"] \
+        .groupby("Item")["Quantidade"].sum().reset_index()
+
+    # DEMANDA DP SEMANA ATUAL
+    hoje = datetime.now()
+    semana = hoje.isocalendar()[1]
+    ano = hoje.year
+    ref_atual = f"{semana:02d}.{ano}"
+
+    demanda_dp_semana = perfil[
+        (perfil["Tipo"] == "DP") &
+        (perfil["Referência"] == ref_atual)
+    ].groupby("Item")["Quantidade"].sum().reset_index()
+
+    # SALDO ALMOX 3
+    if "Saldo Almox 3" in saldo.columns:
+        saldo_almox3 = saldo.groupby("Codigo")["Saldo Almox 3"].sum().reset_index()
+    else:
+        st.error("⚠️ Coluna 'Saldo Almox 3' não encontrada no saldo.")
+        st.stop()
+
+    # =========================
+    # MERGE GERAL
+    # =========================
+    df = saldo_almox3.merge(demanda_dc, left_on="Codigo", right_on="Item", how="left")
+    df = df.merge(demanda_dp, left_on="Codigo", right_on="Item", how="left", suffixes=("", "_DP"))
+    df = df.merge(demanda_dp_semana, left_on="Codigo", right_on="Item", how="left", suffixes=("", "_DP_SEM"))
+
+    # LIMPEZA
+    df["Quantidade"] = df["Quantidade"].fillna(0)
+    df["Quantidade_DP"] = df["Quantidade_DP"].fillna(0)
+    df["Quantidade_DP_SEM"] = df["Quantidade_DP_SEM"].fillna(0)
+
+    # =========================
+    # CÁLCULOS
+    # =========================
+
+    # SALDO VS DEMANDA
+    df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Quantidade"]
+
+    # SUGESTÃO PRODUÇÃO (SEM PARAMETROS POR ENQUANTO)
+    df["Sugestão Produção"] = df["Quantidade"] - df["Saldo Almox 3"]
+    df["Sugestão Produção"] = df["Sugestão Produção"].apply(lambda x: max(x, 0))
+
+    # STATUS
+    def definir_status(row):
+        if row["Saldo vs Demanda"] < 0:
+            return "⛔ FALTA"
+        elif row["Quantidade"] >= row["Saldo Almox 3"] * 0.5:
+            return "⚠️ RISCO"
+        else:
+            return "✅ OK"
+
+    df["Status"] = df.apply(definir_status, axis=1)
+
+    # =========================
+    # CARDS
+    # =========================
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("⛔ FALTA", len(df[df["Status"].str.contains("FALTA")]))
+    col2.metric("⚠️ RISCO", len(df[df["Status"].str.contains("RISCO")]))
+    col3.metric("✅ OK", len(df[df["Status"].str.contains("OK")]))
+
+    st.divider()
+
+    # =========================
+    # CORES
+    # =========================
+    def cor_status(val):
+        if "OK" in val:
+            return "background-color: #c6efce; color: #006100"
+        elif "RISCO" in val:
+            return "background-color: #ffeb9c; color: #9c5700"
+        elif "FALTA" in val:
+            return "background-color: #ffc7ce; color: #9c0006"
+
+    # =========================
+    # TABELA PRINCIPAL
+    # =========================
+    st.subheader("📋 Consumo / Situação")
+
+    tabela = df[[
+        "Codigo",
+        "Saldo Almox 3",
+        "Quantidade",
+        "Quantidade_DP",
+        "Quantidade_DP_SEM",
+        "Sugestão Produção",
+        "Status"
+    ]]
+
+    tabela.columns = [
+        "Código",
+        "Saldo Almox 3",
+        "Demanda DC",
+        "Demanda DP",
+        "DP Semana Atual",
+        "Sugestão Produção",
+        "Status"
+    ]
+
+    st.dataframe(
+        tabela.style.applymap(cor_status, subset=["Status"]),
+        use_container_width=True
+    )
+
+    # =========================
+    # GRÁFICO
+    # =========================
+    st.subheader("📊 Saldo x Demanda")
+
+    grafico = df.set_index("Codigo")[["Saldo Almox 3", "Quantidade"]]
+    st.bar_chart(grafico)
+
+    # =========================
+    # TOP PRODUÇÃO
+    # =========================
+    st.subheader("🏭 Sugestão de Produção")
+
+    top = df.sort_values(by="Sugestão Produção", ascending=False).head(10)
+
+    st.dataframe(
+        top[["Codigo", "Sugestão Produção", "Status"]],
+        use_container_width=True
+    )
