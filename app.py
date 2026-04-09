@@ -22,6 +22,7 @@ abas = st.tabs([
     "📊 Perfil",
     "📄 Ordens",
     "📅 Previsão",
+    "📋 Base de Dados",
     "📊 Análise PCP"
 ])
 
@@ -80,7 +81,7 @@ with abas[0]:
             df.to_csv("saldo.csv", index=False)
 
             st.success("Saldo processado!")
-            st.dataframe(df)
+            st.dataframe(df, use_container_width=True)
 
 # ==========================================================
 # PERFIL
@@ -128,7 +129,7 @@ with abas[1]:
             df.to_csv("perfil.csv", index=False)
 
             st.success("Perfil processado!")
-            st.dataframe(df)
+            st.dataframe(df, use_container_width=True)
 
 # ==========================================================
 # ORDENS
@@ -148,7 +149,7 @@ with abas[2]:
         df.to_csv("ordens.csv", index=False)
 
         st.success("Ordens carregadas!")
-        st.dataframe(df)
+        st.dataframe(df, use_container_width=True)
 
 # ==========================================================
 # PREVISÃO
@@ -174,12 +175,51 @@ with abas[3]:
         df.to_csv("previsao.csv", index=False)
 
         st.success("Previsão carregada!")
-        st.dataframe(df)
+        st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# BASE DE DADOS
+# ==========================================================
+with abas[4]:
+    st.title("📋 Base de Dados (Último Upload)")
+
+    arquivos = {
+        "Saldo": ("saldo.csv", "Codigo"),
+        "Perfil": ("perfil.csv", "Item"),
+        "Ordens": ("ordens.csv", None),
+        "Previsão": ("previsao.csv", "COD")
+    }
+
+    for nome, (arquivo, chave) in arquivos.items():
+        st.subheader(nome)
+
+        if os.path.exists(arquivo):
+            df = pd.read_csv(arquivo)
+
+            if "Data Processamento" in df.columns:
+                df = df.sort_values(
+                    by=["Data Processamento", "Hora Processamento"],
+                    ascending=False
+                )
+
+            if chave and chave in df.columns:
+                df = df.drop_duplicates(subset=[chave], keep="first")
+
+            st.dataframe(df, use_container_width=True)
+
+            st.download_button(
+                f"📥 Baixar {nome}",
+                df.to_csv(index=False).encode("utf-8"),
+                file_name=f"{nome}_limpo.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning(f"{nome} ainda não carregado.")
 
 # ==========================================================
 # ANALISE PCP
 # ==========================================================
-with abas[4]:
+with abas[5]:
     st.title("📊 Análise PCP")
 
     try:
@@ -189,6 +229,14 @@ with abas[4]:
     except:
         st.warning("⚠️ Faça upload dos dados primeiro.")
         st.stop()
+
+    saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["Codigo"])
+
+    perfil = perfil.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)
+
+    previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["COD"])
 
     base = previsao[["COD", "PRODUTO"]].copy()
     base.columns = ["Codigo", "Descricao"]
@@ -225,7 +273,6 @@ with abas[4]:
         (perfil["Tipo"] == "DP") &
         (perfil["Referencia"] == ref)
     ].groupby("Item")["Quantidade"].sum().reset_index()
-
     dp_sem.columns = ["Codigo", "DP Semana Atual"]
 
     df = base.merge(saldo_base, on="Codigo", how="left")
