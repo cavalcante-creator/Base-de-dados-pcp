@@ -15,6 +15,15 @@ def agora():
     return datetime.now(fuso)
 
 # ==========================================================
+# FUNÇÃO SALVAR (COM HISTÓRICO)
+# ==========================================================
+def salvar_csv(df, nome):
+    if os.path.exists(nome):
+        antigo = pd.read_csv(nome)
+        df = pd.concat([antigo, df], ignore_index=True)
+    df.to_csv(nome, index=False)
+
+# ==========================================================
 # ABAS
 # ==========================================================
 abas = st.tabs([
@@ -25,15 +34,6 @@ abas = st.tabs([
     "📋 Base de Dados",
     "📊 Análise PCP"
 ])
-
-# ==========================================================
-# FUNÇÃO SALVAR HISTÓRICO
-# ==========================================================
-def salvar_csv(df, nome_arquivo):
-    if os.path.exists(nome_arquivo):
-        antigo = pd.read_csv(nome_arquivo)
-        df = pd.concat([antigo, df], ignore_index=True)
-    df.to_csv(nome_arquivo, index=False)
 
 # ==========================================================
 # SALDO
@@ -183,6 +183,37 @@ with abas[3]:
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
+# BASE DE DADOS
+# ==========================================================
+with abas[4]:
+    st.title("📋 Base de Dados")
+
+    arquivos = ["saldo.csv", "perfil.csv", "ordens.csv", "previsao.csv"]
+
+    st.write("Arquivos na pasta:")
+    st.write(os.listdir())
+
+    for arq in arquivos:
+        st.subheader(arq)
+
+        if not os.path.exists(arq):
+            st.error("Arquivo não encontrado")
+            continue
+
+        try:
+            df = pd.read_csv(arq)
+
+            if df.empty:
+                st.warning("Arquivo vazio")
+                continue
+
+            st.success(f"{len(df)} registros")
+            st.dataframe(df, use_container_width=True)
+
+        except Exception as e:
+            st.error(e)
+
+# ==========================================================
 # ANALISE PCP
 # ==========================================================
 with abas[5]:
@@ -193,30 +224,26 @@ with abas[5]:
         perfil = pd.read_csv("perfil.csv")
         previsao = pd.read_csv("previsao.csv")
     except:
-        st.warning("⚠️ Faça upload dos dados primeiro.")
+        st.warning("Faça upload dos dados primeiro")
         st.stop()
 
-    # FILTRO DE DATA
     datas = sorted(saldo["Data Processamento"].dropna().unique())
-    data_sel = st.selectbox("📅 Selecione a Data", datas)
+    data_sel = st.selectbox("📅 Data", datas)
 
-    # FILTRAR ÚLTIMO DO DIA
     saldo = saldo[saldo["Data Processamento"] == data_sel]\
         .sort_values(by="Hora Processamento", ascending=False)\
         .drop_duplicates("Codigo")
 
     perfil = perfil[perfil["Data Processamento"] == data_sel]
+
     previsao = previsao[previsao["Data Processamento"] == data_sel]\
         .sort_values(by="Hora Processamento", ascending=False)\
         .drop_duplicates("COD")
 
-    # BASE
-    base = previsao[["COD", "PRODUTO"]].copy()
-    base.columns = ["Codigo", "Descricao"]
+    base = previsao.rename(columns={"COD": "Codigo", "PRODUTO": "Descricao"})
 
     saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
 
-    # TRATAR PERFIL
     perfil["Quantidade"] = (
         perfil["Quantidade"].astype(str)
         .str.replace(".", "")
@@ -224,41 +251,32 @@ with abas[5]:
         .astype(float)
     )
 
-    perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True)
-
-    # DEMANDA
     dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
     dc.columns = ["Codigo", "Demanda Pedido"]
 
-    dp = perfil[perfil["Tipo"] == "DP"].groupby("Item")["Quantidade"].sum().reset_index()
-    dp.columns = ["Codigo", "Demanda DP"]
-
-    # MERGE
     df = base.merge(saldo_base, on="Codigo", how="left")
     df = df.merge(dc, on="Codigo", how="left")
-    df = df.merge(dp, on="Codigo", how="left")
 
     df = df.fillna(0)
 
-    # STATUS
     df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
-    def status(row):
-        if row["Saldo vs Demanda"] < 0:
+    def status(x):
+        if x < 0:
             return "🔴 FALTA"
-        elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+        elif x < 50:
             return "🟡 RISCO"
         else:
             return "🟢 OK"
 
-    df["Status"] = df.apply(status, axis=1)
+    df["Status"] = df["Saldo vs Demanda"].apply(status)
 
-    # CARDS (POWER BI STYLE)
+    # CARDS
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("🔴 FALTA", len(df[df["Status"].str.contains("FALTA")]))
-    col2.metric("🟡 RISCO", len(df[df["Status"].str.contains("RISCO")]))
-    col3.metric("🟢 OK", len(df[df["Status"].str.contains("OK")]))
+    col1.metric("🔴 FALTA", (df["Status"] == "🔴 FALTA").sum())
+    col2.metric("🟡 RISCO", (df["Status"] == "🟡 RISCO").sum())
+    col3.metric("🟢 OK", (df["Status"] == "🟢 OK").sum())
 
     st.divider()
 
