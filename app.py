@@ -15,7 +15,7 @@ def agora():
     return datetime.now(fuso)
 
 # ==========================================================
-# CSV ROBUSTO
+# FUNÇÕES BASE
 # ==========================================================
 def ler_csv_seguro(file):
     try:
@@ -29,18 +29,12 @@ def ler_csv_seguro(file):
             except:
                 return pd.DataFrame()
 
-# ==========================================================
-# SALVAR CSV
-# ==========================================================
 def salvar_csv(df, nome):
     if os.path.exists(nome):
         antigo = ler_csv_seguro(nome)
         df = pd.concat([antigo, df], ignore_index=True)
     df.to_csv(nome, index=False)
 
-# ==========================================================
-# LIMPAR BASE
-# ==========================================================
 def limpar_base():
     for arq in ["saldo.csv","perfil.csv","ordens.csv","previsao.csv","parametros.csv"]:
         if os.path.exists(arq):
@@ -63,8 +57,6 @@ abas = st.tabs([
 # SALDO
 # ==========================================================
 with abas[0]:
-    st.title("📦 Saldo")
-
     file = st.file_uploader("PDF Saldo", type=["pdf"])
 
     if file:
@@ -86,7 +78,8 @@ with abas[0]:
                 m=re.search(r'\b([A-Z]{1,3}\d{3,5})\b',linha)
                 if m:
                     cod=m.group(1)
-                    dados[cod]={"Codigo":cod,"Saldo Total":0,"Saldo Almox 3":0}
+                    if cod not in dados:
+                        dados[cod]={"Codigo":cod,"Saldo Total":0,"Saldo Almox 3":0}
                     continue
 
                 if "ALMOXARIFADO" in linha.upper() and cod:
@@ -94,7 +87,7 @@ with abas[0]:
                     if nums:
                         v=float(nums[-1].replace(".","").replace(",","."))
                         dados[cod]["Saldo Total"]+=v
-                        dados[cod]["Saldo Almox 3"]=v
+                        dados[cod]["Saldo Almox 3"]+=v
 
             df=pd.DataFrame(dados.values())
             df["Data Processamento"]=agora().strftime("%d/%m/%Y")
@@ -106,8 +99,6 @@ with abas[0]:
 # PERFIL
 # ==========================================================
 with abas[1]:
-    st.title("📊 Perfil")
-
     file = st.file_uploader("PDF Perfil", type=["pdf"])
 
     if file:
@@ -144,38 +135,26 @@ with abas[1]:
             st.dataframe(df)
 
 # ==========================================================
-# ORDENS
-# ==========================================================
-with abas[2]:
-    st.title("📄 Ordens")
-
-    file = st.file_uploader("CSV", type=["csv"])
-
-    if file:
-        conteudo=file.read().decode("latin-1",errors="ignore")
-        df=ler_csv_seguro(StringIO(conteudo))
-        df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
-        salvar_csv(df,"ordens.csv")
-        st.dataframe(df)
-
-# ==========================================================
 # PREVISÃO
 # ==========================================================
 with abas[3]:
-    st.title("📅 Previsão")
-
-    file = st.file_uploader("Excel", type=["xlsx"])
+    file = st.file_uploader("Excel Previsão", type=["xlsx","xls"])
 
     if file:
         df=pd.read_excel(file)
         df.columns=df.columns.astype(str).str.upper()
 
-        col_cod=[c for c in df.columns if "COD" in c][0]
-        col_desc=[c for c in df.columns if "PROD" in c or "DESC" in c][0]
+        col_cod = next((c for c in df.columns if "COD" in c), None)
+        col_desc = next((c for c in df.columns if "DESC" in c or "PROD" in c), None)
+
+        if col_cod is None or col_desc is None:
+            st.error("Colunas não encontradas")
+            st.stop()
 
         df=df[[col_cod,col_desc]]
-        df.columns=["COD","DESCRICAO"]
+        df.columns=["Codigo","Descricao"]
+
+        df=df.drop_duplicates(subset=["Codigo"])
 
         df["Data Processamento"]=agora().strftime("%d/%m/%Y")
 
@@ -186,55 +165,37 @@ with abas[3]:
 # PARÂMETROS
 # ==========================================================
 with abas[4]:
-    st.title("⚙️ Parâmetros")
-
-    file = st.file_uploader("Arquivo Parâmetros", type=None)
+    file = st.file_uploader("Parâmetros", type=None)
 
     if file:
         try:
             try:
-                df = pd.read_excel(file, engine="openpyxl")
+                df = pd.read_excel(file)
             except:
-                try:
-                    df = pd.read_excel(file, engine="xlrd")
-                except:
-                    df = ler_csv_seguro(file)
+                df = ler_csv_seguro(file)
 
             df.columns=df.columns.astype(str).str.upper()
 
-            col_cod=[c for c in df.columns if "COD" in c][0]
-            col_seg=[c for c in df.columns if "ESTQ" in c][0]
+            col_cod = next((c for c in df.columns if "COD" in c), None)
+            col_seg = next((c for c in df.columns if "ESTQ" in c or "SEG" in c), None)
+
+            if col_cod is None or col_seg is None:
+                st.error("Colunas não encontradas")
+                st.write(df.columns.tolist())
+                st.stop()
 
             df=df[[col_cod,col_seg]]
-            df.columns=["COD","ESTQ SEG"]
+            df.columns=["Codigo","Estq Seg"]
 
-            df["ESTQ SEG"]=pd.to_numeric(df["ESTQ SEG"],errors="coerce").fillna(0)
+            df["Estq Seg"]=pd.to_numeric(df["Estq Seg"],errors="coerce").fillna(0)
 
             df["Data Processamento"]=agora().strftime("%d/%m/%Y")
 
             salvar_csv(df,"parametros.csv")
-
-            st.success("Parâmetros carregados!")
             st.dataframe(df)
 
         except Exception as e:
-            st.error(f"Erro: {e}")
-
-# ==========================================================
-# BASE
-# ==========================================================
-with abas[5]:
-    st.title("📋 Base")
-
-    if st.button("🗑 Limpar Base"):
-        limpar_base()
-
-    for arq in ["saldo.csv","perfil.csv","ordens.csv","previsao.csv","parametros.csv"]:
-        st.subheader(arq)
-        if os.path.exists(arq):
-            st.dataframe(ler_csv_seguro(arq))
-        else:
-            st.warning("Sem dados")
+            st.error(e)
 
 # ==========================================================
 # DASHBOARD
@@ -250,14 +211,11 @@ with abas[6]:
     perfil=ler_csv_seguro("perfil.csv")
     previsao=ler_csv_seguro("previsao.csv")
 
-    datas=saldo["Data Processamento"].dropna().unique()
-    data_sel=st.selectbox("📅 Data",datas)
+    data_sel=saldo["Data Processamento"].max()
 
     saldo=saldo[saldo["Data Processamento"]==data_sel]
     perfil=perfil[perfil["Data Processamento"]==data_sel]
     previsao=previsao[previsao["Data Processamento"]==data_sel]
-
-    base=previsao.rename(columns={"COD":"Codigo","DESCRICAO":"Descricao"})
 
     perfil["Quantidade"]=perfil["Quantidade"].astype(str)\
         .str.replace(".","").str.replace(",",".").astype(float)
@@ -269,6 +227,7 @@ with abas[6]:
     dp.columns=["Codigo","Demanda DP"]
 
     semana=str(datetime.now().isocalendar()[1]).zfill(2)
+
     perfil["Semana"]=pd.to_datetime(perfil["Data Processamento"],dayfirst=True)\
         .dt.isocalendar().week.astype(str).str.zfill(2)
 
@@ -277,22 +236,33 @@ with abas[6]:
 
     dp_sem.columns=["Codigo","Demanda DP Semana"]
 
-    df=base.merge(saldo,on="Codigo",how="left")\
-           .merge(dc,on="Codigo",how="left")\
-           .merge(dp,on="Codigo",how="left")\
-           .merge(dp_sem,on="Codigo",how="left")
+    df=previsao.merge(saldo,on="Codigo",how="left")\
+        .merge(dc,on="Codigo",how="left")\
+        .merge(dp,on="Codigo",how="left")\
+        .merge(dp_sem,on="Codigo",how="left")
 
     df=df.fillna(0)
+
+    # REMOVE DUPLICADOS 🔥
+    df=df.groupby(["Codigo","Descricao"],as_index=False).sum()
 
     df["Saldo vs Demanda"]=df["Saldo Almox 3"]-df["Demanda Pedido"]
 
     def status(x):
-        if x<0: return "🔴 FALTA"
-        elif x<50: return "🟡 RISCO"
-        else: return "🟢 OK"
+        if x<0: return "FALTA"
+        elif x<50: return "RISCO"
+        else: return "OK"
 
     df["Status"]=df["Saldo vs Demanda"].apply(status)
 
+    # CARDS 🔥
+    col1,col2,col3=st.columns(3)
+
+    col1.metric("🔴 FALTA", len(df[df["Status"]=="FALTA"]))
+    col2.metric("🟡 RISCO", len(df[df["Status"]=="RISCO"]))
+    col3.metric("🟢 OK", len(df[df["Status"]=="OK"]))
+
+    # TABELA FINAL
     df_final=df[[
         "Codigo",
         "Descricao",
