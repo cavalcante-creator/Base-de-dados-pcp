@@ -26,7 +26,7 @@ pagina = st.sidebar.radio(
         "Upload Ordens de Fabricação",
         "Upload Previsão Produção",
         "Gerar Excel",
-        "📊 Dashboard PCP"
+        "📊 Análise PCP"
     ]
 )
 
@@ -96,8 +96,7 @@ if pagina == "Upload Saldo Produção":
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
             df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-            arquivo = "saldo.csv"
-            df.to_csv(arquivo, index=False)
+            df.to_csv("saldo.csv", index=False)
 
             st.success("Saldo processado!")
             st.dataframe(df, use_container_width=True)
@@ -230,69 +229,67 @@ if pagina == "Gerar Excel":
         if os.path.exists(arquivo):
             df = pd.read_csv(arquivo)
 
-            if "Data Processamento" in df.columns:
-                df = df.sort_values(
-                    by=["Data Processamento", "Hora Processamento"],
-                    ascending=False
-                )
-
             st.subheader(nome)
             st.dataframe(df, use_container_width=True)
 
-            if st.button(f"Gerar Excel {nome}"):
-                nome_excel = f"{nome}_{agora().strftime('%H-%M-%S')}.xlsx"
-                df.to_excel(nome_excel, index=False)
-
-                with open(nome_excel, "rb") as f:
-                    st.download_button(
-                        f"📥 Baixar {nome}",
-                        f,
-                        file_name=nome_excel
-                    )
-
 # ==========================================================
-# DASHBOARD PCP
+# ANALISE PCP (BASE CORRETA)
 # ==========================================================
-if pagina == "📊 Dashboard PCP":
-    st.title("📊 Monitoramento PCP")
+if pagina == "📊 Análise PCP":
+    st.title("📊 Análise PCP")
 
     try:
         saldo = pd.read_csv("saldo.csv")
         perfil = pd.read_csv("perfil.csv")
+        previsao = pd.read_csv("previsao.csv")
     except:
-        st.warning("⚠️ Carregue os dados primeiro.")
+        st.warning("⚠️ Carregue todos os dados primeiro.")
         st.stop()
 
-    perfil["Quantidade"] = perfil["Quantidade"].astype(str)\
-        .str.replace(".", "", regex=False)\
-        .str.replace(",", ".", regex=False).astype(float)
+    # =========================
+    # ULTIMO UPLOAD
+    # =========================
+    saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["Codigo"])
 
-    perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True)
+    perfil = perfil.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)
 
-    perfil["Referência"] = (
-        perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
-        + "." +
-        perfil["Data Fim"].dt.year.astype(str)
+    previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["COD"])
+
+    # =========================
+    # BASE PREVISÃO
+    # =========================
+    base = previsao[["COD", "PRODUTO"]].copy()
+    base.columns = ["Codigo", "Descricao"]
+
+    # =========================
+    # SALDO
+    # =========================
+    saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
+
+    # =========================
+    # DEMANDA DC
+    # =========================
+    perfil["Quantidade"] = (
+        perfil["Quantidade"]
+        .astype(str)
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+        .astype(float)
     )
 
-    demanda_dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
+    demanda = perfil[perfil["Tipo"] == "DC"]\
+        .groupby("Item")["Quantidade"].sum().reset_index()
 
-    saldo_almox3 = saldo.groupby("Codigo")["Saldo Almox 3"].sum().reset_index()
+    demanda.columns = ["Codigo", "Demanda Pedido"]
 
-    df = saldo_almox3.merge(demanda_dc, left_on="Codigo", right_on="Item", how="left")
-    df["Quantidade"] = df["Quantidade"].fillna(0)
+    # =========================
+    # MERGE FINAL
+    # =========================
+    df = base.merge(saldo_base, on="Codigo", how="left")
+    df = df.merge(demanda, on="Codigo", how="left")
 
-    df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Quantidade"]
-    df["Sugestão Produção"] = (df["Quantidade"] - df["Saldo Almox 3"]).clip(lower=0)
-
-    def status(row):
-        if row["Saldo vs Demanda"] < 0:
-            return "⛔ FALTA"
-        elif row["Quantidade"] >= row["Saldo Almox 3"] * 0.5:
-            return "⚠️ RISCO"
-        else:
-            return "✅ OK"
-
-    df["Status"] = df.apply(status, axis=1)
+    df = df.fillna(0)
 
     st.dataframe(df, use_container_width=True)
