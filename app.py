@@ -1,104 +1,333 @@
+import streamlit as st
 import pdfplumber
 import pandas as pd
 import re
-import glob
+from datetime import datetime
 import os
+from io import StringIO
+import pytz
 
-# ============================================================
-# LOCALIZAR PDF MAIS RECENTE
-# ============================================================
+st.set_page_config(page_title="PCP Produção", layout="wide")
 
-pasta_pdf = "."
-padrao_pdf = os.path.join(pasta_pdf, "SALDO PRODUÇÃO *.pdf")
+fuso = pytz.timezone("America/Sao_Paulo")
 
-arquivos = glob.glob(padrao_pdf)
+def agora():
+    return datetime.now(fuso)
 
-if not arquivos:
-    print("❌ Nenhum PDF encontrado.")
-    exit()
+# ==========================================================
+# ABAS
+# ==========================================================
+abas = st.tabs([
+    "📦 Saldo",
+    "📊 Perfil",
+    "📄 Ordens",
+    "📅 Previsão",
+    "📋 Base de Dados",
+    "📊 Análise PCP"
+])
 
-arquivos.sort(key=os.path.getmtime)
-arquivo_pdf = arquivos[-1]
+# ==========================================================
+# SALDO
+# ==========================================================
+with abas[0]:
+    st.title("📦 Saldo Produção")
 
-print(f"✅ Usando PDF: {arquivo_pdf}")
+    file = st.file_uploader("PDF Saldo", type=["pdf"])
 
-# ============================================================
-# LER PDF
-# ============================================================
+    if file:
+        with open("saldo_temp.pdf", "wb") as f:
+            f.write(file.read())
 
-linhas = []
+        if st.button("Processar Saldo"):
+            linhas = []
 
-with pdfplumber.open(arquivo_pdf) as pdf:
-    for pagina in pdf.pages:
-        texto = pagina.extract_text()
-        if texto:
-            linhas.extend(texto.split("\n"))
+            with pdfplumber.open("saldo_temp.pdf") as pdf:
+                for p in pdf.pages:
+                    texto = p.extract_text()
+                    if texto:
+                        linhas.extend(texto.split("\n"))
 
-# ============================================================
-# EXTRAÇÃO
-# ============================================================
+            dados = {}
+            codigo_atual = None
 
-dados = {}
-codigo_atual = None
+            for linha in linhas:
+                linha = linha.strip()
+                if not linha:
+                    continue
 
-for linha in linhas:
+                codigo_match = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
 
-    linha = linha.strip()
-    linha_upper = linha.upper()
+                if codigo_match:
+                    codigo_atual = codigo_match.group(1)
+                    if codigo_atual not in dados:
+                        dados[codigo_atual] = {
+                            "Codigo": codigo_atual,
+                            "Saldo Total": 0,
+                            "Saldo Almox 3": 0
+                        }
+                    continue
 
-    # detectar código do item
-    codigo_match = re.search(r'\b[A-Z]{2}\d{4}\b', linha)
+                if "ALMOXARIFADO" in linha.upper() and codigo_atual:
+                    nums = re.findall(r'[\d\.]+\,\d+', linha)
+                    if nums:
+                        valor = float(nums[-1].replace(".", "").replace(",", "."))
+                        dados[codigo_atual]["Saldo Total"] += valor
 
-    if codigo_match:
-        codigo_atual = codigo_match.group()
+                        if re.search(r'ALMOXARIFADO\s*:\s*3\b', linha.upper()):
+                            dados[codigo_atual]["Saldo Almox 3"] += valor
 
-        if codigo_atual not in dados:
-            dados[codigo_atual] = {
-                "Saldo Total": 0,
-                "Saldo Almox 3": 0
-            }
+            df = pd.DataFrame(dados.values())
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-        continue
+            df.to_csv("saldo.csv", index=False)
 
-    # linhas de almoxarifado
-    if "ALMOXARIFADO" in linha_upper and codigo_atual:
+            st.success("Saldo processado!")
+            st.dataframe(df, use_container_width=True)
 
-        numeros = re.findall(r'[\d\.]+\,\d+', linha)
+# ==========================================================
+# PERFIL
+# ==========================================================
+with abas[1]:
+    st.title("📊 Perfil Produção")
 
-        if numeros:
+    file = st.file_uploader("PDF Perfil", type=["pdf"])
 
-            saldo_str = numeros[-1]
+    if file:
+        with open("perfil_temp.pdf", "wb") as f:
+            f.write(file.read())
 
-            try:
-                saldo = float(
-                    saldo_str.replace('.', '').replace(',', '.')
+        if st.button("Processar Perfil"):
+
+            movimentacoes = []
+            codigo_item = ""
+
+            regex = re.compile(
+                r'(DD|DC|DP).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+)'
+            )
+
+            with pdfplumber.open("perfil_temp.pdf") as pdf:
+                for p in pdf.pages:
+                    texto = p.extract_text()
+                    if texto:
+                        for linha in texto.split("\n"):
+                            item_match = re.search(r'Item:\s*(\S+)', linha)
+                            if item_match:
+                                codigo_item = item_match.group(1)
+
+                            mov = regex.search(linha)
+                            if mov:
+                                movimentacoes.append({
+                                    "Item": codigo_item,
+                                    "Tipo": mov.group(1),
+                                    "Data Fim": mov.group(2),
+                                    "Quantidade": mov.group(3)
+                                })
+
+            df = pd.DataFrame(movimentacoes)
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+            df.to_csv("perfil.csv", index=False)
+
+            st.success("Perfil processado!")
+            st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# ORDENS
+# ==========================================================
+with abas[2]:
+    st.title("📄 Ordens")
+
+    file = st.file_uploader("CSV Ordens", type=["csv"])
+
+    if file:
+        conteudo = file.read().decode("utf-8", errors="ignore")
+        df = pd.read_csv(StringIO(conteudo), sep=None, engine="python")
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        df.to_csv("ordens.csv", index=False)
+
+        st.success("Ordens carregadas!")
+        st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# PREVISÃO
+# ==========================================================
+with abas[3]:
+    st.title("📅 Previsão")
+
+    file = st.file_uploader("Excel Previsão", type=["xlsx"])
+
+    if file:
+
+        df_raw = pd.read_excel(file, header=None)
+
+        linha_header = None
+        for i in range(len(df_raw)):
+            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
+                linha_header = i
+                break
+
+        if linha_header is None:
+            st.error("❌ Não foi possível localizar a linha de cabeçalho.")
+            st.stop()
+
+        df = pd.read_excel(file, header=linha_header)
+
+        df.columns = df.columns.astype(str).str.upper().str.strip()
+
+        col_cod = [c for c in df.columns if "COD" in c][0]
+        col_prod = [c for c in df.columns if "PROD" in c][0]
+
+        df = df[[col_cod, col_prod]]
+        df.columns = ["COD", "PRODUTO"]
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        df.to_csv("previsao.csv", index=False)
+
+        st.success("Previsão carregada!")
+        st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# BASE DE DADOS
+# ==========================================================
+with abas[4]:
+    st.title("📋 Base de Dados (Último Upload)")
+
+    if st.button("🗑️ Limpar Base de Dados"):
+        arquivos_para_remover = [
+            "saldo.csv",
+            "perfil.csv",
+            "ordens.csv",
+            "previsao.csv"
+        ]
+
+        removidos = []
+
+        for arq in arquivos_para_remover:
+            if os.path.exists(arq):
+                os.remove(arq)
+                removidos.append(arq)
+
+        if removidos:
+            st.success(f"Arquivos removidos: {', '.join(removidos)}")
+        else:
+            st.warning("Nenhum arquivo encontrado para remover.")
+
+    arquivos = {
+        "Saldo": ("saldo.csv", "Codigo"),
+        "Perfil": ("perfil.csv", "Item"),
+        "Ordens": ("ordens.csv", None),
+        "Previsão": ("previsao.csv", "COD")
+    }
+
+    for nome, (arquivo, chave) in arquivos.items():
+        st.subheader(nome)
+
+        if os.path.exists(arquivo):
+            df = pd.read_csv(arquivo)
+
+            if "Data Processamento" in df.columns:
+                df = df.sort_values(
+                    by=["Data Processamento", "Hora Processamento"],
+                    ascending=False
                 )
-            except:
-                saldo = 0
 
-            # saldo total
-            dados[codigo_atual]["Saldo Total"] += saldo
+            if chave and chave in df.columns:
+                df = df.drop_duplicates(subset=[chave], keep="first")
 
-            # saldo almoxarifado 3
-            if "ALMOXARIFADO: 3" in linha_upper:
-                dados[codigo_atual]["Saldo Almox 3"] += saldo
+            st.dataframe(df, use_container_width=True)
 
-# ============================================================
-# DATAFRAME
-# ============================================================
+            st.download_button(
+                f"📥 Baixar {nome}",
+                df.to_csv(index=False).encode("utf-8"),
+                file_name=f"{nome}_limpo.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning(f"{nome} ainda não carregado.")
 
-df = pd.DataFrame(
-    [{"Codigo": k, **v} for k, v in dados.items()]
-)
+# ==========================================================
+# ANALISE PCP
+# ==========================================================
+with abas[5]:
+    st.title("📊 Análise PCP")
 
-print("\n📊 Dados extraídos:")
-print(df)
+    try:
+        saldo = pd.read_csv("saldo.csv")
+        perfil = pd.read_csv("perfil.csv")
+        previsao = pd.read_csv("previsao.csv")
+    except:
+        st.warning("⚠️ Faça upload dos dados primeiro.")
+        st.stop()
 
-# ============================================================
-# EXPORTAR
-# ============================================================
+    saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["Codigo"])
 
-saida = "saldo_producao_extraido.xlsx"
-df.to_excel(saida, index=False)
+    perfil = perfil.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)
 
-print(f"\n✅ Arquivo gerado: {saida}")
+    previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
+        .drop_duplicates(subset=["COD"])
+
+    base = previsao[["COD", "PRODUTO"]].copy()
+    base.columns = ["Codigo", "Descricao"]
+
+    saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
+
+    perfil["Quantidade"] = (
+        perfil["Quantidade"]
+        .astype(str)
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+        .astype(float)
+    )
+
+    perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True)
+
+    perfil["Referencia"] = (
+        perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
+        + "." +
+        perfil["Data Fim"].dt.year.astype(str)
+    )
+
+    semana = datetime.now().isocalendar()[1]
+    ano = datetime.now().year
+    ref = str(semana).zfill(2) + "." + str(ano)
+
+    dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
+    dc.columns = ["Codigo", "Demanda Pedido"]
+
+    dp = perfil[perfil["Tipo"] == "DP"].groupby("Item")["Quantidade"].sum().reset_index()
+    dp.columns = ["Codigo", "Demanda DP"]
+
+    dp_sem = perfil[
+        (perfil["Tipo"] == "DP") &
+        (perfil["Referencia"] == ref)
+    ].groupby("Item")["Quantidade"].sum().reset_index()
+    dp_sem.columns = ["Codigo", "DP Semana Atual"]
+
+    df = base.merge(saldo_base, on="Codigo", how="left")
+    df = df.merge(dc, on="Codigo", how="left")
+    df = df.merge(dp, on="Codigo", how="left")
+    df = df.merge(dp_sem, on="Codigo", how="left")
+
+    df = df.fillna(0)
+
+    df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+
+    def status(row):
+        if row["Saldo vs Demanda"] < 0:
+            return "🔴 FALTA"
+        elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+            return "🟡 RISCO"
+        else:
+            return "🟢 OK"
+
+    df["Status"] = df.apply(status, axis=1)
+
+    st.dataframe(df, use_container_width=True)
