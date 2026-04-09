@@ -183,6 +183,27 @@ with abas[3]:
 with abas[4]:
     st.title("📋 Base de Dados (Último Upload)")
 
+    # BOTÃO LIMPAR BASE
+    if st.button("🗑️ Limpar Base de Dados"):
+        arquivos_para_remover = [
+            "saldo.csv",
+            "perfil.csv",
+            "ordens.csv",
+            "previsao.csv"
+        ]
+
+        removidos = []
+
+        for arq in arquivos_para_remover:
+            if os.path.exists(arq):
+                os.remove(arq)
+                removidos.append(arq)
+
+        if removidos:
+            st.success(f"Arquivos removidos: {', '.join(removidos)}")
+        else:
+            st.warning("Nenhum arquivo encontrado para remover.")
+
     arquivos = {
         "Saldo": ("saldo.csv", "Codigo"),
         "Perfil": ("perfil.csv", "Item"),
