@@ -21,7 +21,7 @@ abas = st.tabs([
     "📦 Saldo",
     "📊 Perfil",
     "📄 Ordens",
-    "📅 Previsão",
+    "🗓️ Previsão",
     "📋 Base de Dados",
     "📊 Análise PCP"
 ])
@@ -72,7 +72,8 @@ with abas[0]:
                     if nums:
                         valor = float(nums[-1].replace(".", "").replace(",", "."))
                         dados[codigo_atual]["Saldo Total"] += valor
-                        dados[codigo_atual]["Saldo Almox 3"] = valor
+                        if re.search(r'ALMOXARIFADO\s*:\s*3\b', linha.upper()):
+                            dados[codigo_atual]["Saldo Almox 3"] += valor
 
             df = pd.DataFrame(dados.values())
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
@@ -155,7 +156,7 @@ with abas[2]:
 # PREVISÃO (INTELIGENTE)
 # ==========================================================
 with abas[3]:
-    st.title("📅 Previsão")
+    st.title("🗓️ Previsão")
 
     file = st.file_uploader("Excel Previsão", type=["xlsx"])
 
