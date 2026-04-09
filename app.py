@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import os
@@ -16,6 +17,7 @@ def data_hora_brasil():
     fuso = pytz.timezone("America/Sao_Paulo")
     return datetime.now(fuso).strftime("%d/%m/%Y %H:%M:%S")
 
+
 def identificar_linha_header(df_raw):
     for i in range(min(15, len(df_raw))):
         linha = df_raw.iloc[i].astype(str).str.upper()
@@ -31,52 +33,6 @@ def identificar_linha_header(df_raw):
 
     return 0
 
-def abrir_arquivo_generico(file):
-    nome_arquivo = file.name.lower()
-
-    try:
-        if nome_arquivo.endswith(".csv"):
-            file.seek(0)
-            try:
-                return pd.read_csv(file, sep=";", encoding="latin1", header=None)
-            except:
-                file.seek(0)
-                return pd.read_csv(file, sep=",", encoding="latin1", header=None)
-
-        elif nome_arquivo.endswith(".xlsx"):
-            file.seek(0)
-            return pd.read_excel(file, header=None, engine="openpyxl")
-
-        elif nome_arquivo.endswith(".xls"):
-            file.seek(0)
-
-            try:
-                return pd.read_excel(file, header=None, engine="xlrd")
-            except:
-                file.seek(0)
-
-                try:
-                    conteudo = file.read().decode("latin1", errors="ignore")
-
-                    tabelas = pd.read_html(io.StringIO(conteudo))
-
-                    if len(tabelas) > 0:
-                        return tabelas[0]
-                    else:
-                        st.error("Não foi encontrada nenhuma tabela no arquivo.")
-                        st.stop()
-
-                except Exception as e:
-                    st.error(f"Erro ao abrir arquivo .xls: {e}")
-                    st.stop()
-
-        else:
-            st.error("Formato de arquivo não suportado.")
-            st.stop()
-
-    except Exception as e:
-        st.error(f"Erro ao abrir arquivo: {e}")
-        st.stop()
 
 def carregar_dataframe(file):
     nome_arquivo = file.name.lower()
@@ -131,6 +87,7 @@ def carregar_dataframe(file):
 
                 try:
                     conteudo = file.read().decode("latin1", errors="ignore")
+
                     tabelas = pd.read_html(io.StringIO(conteudo))
 
                     if len(tabelas) == 0:
@@ -152,15 +109,16 @@ def carregar_dataframe(file):
                     st.stop()
 
         else:
-            st.error("Formato não suportado.")
+            st.error("Formato de arquivo não suportado. Use CSV, XLSX ou XLS.")
             st.stop()
 
     except Exception as e:
         st.error(f"Erro ao processar arquivo: {e}")
         st.stop()
 
+
 # =========================
-# MENU
+# MENU LATERAL
 # =========================
 
 pagina = st.sidebar.selectbox(
@@ -177,7 +135,7 @@ st.title("Base de Dados PCP")
 st.caption(f"Última atualização: {data_hora_brasil()}")
 
 # =========================
-# PERFIL
+# UPLOAD PERFIL
 # =========================
 
 if pagina == "Upload Perfil":
@@ -193,12 +151,25 @@ if pagina == "Upload Perfil":
 
         df = carregar_dataframe(file)
 
-        st.success("Arquivo carregado com sucesso!")
-        st.write("Pré-visualização:")
-        st.dataframe(df.head())
+        st.success("Arquivo Perfil carregado com sucesso!")
+
+        st.write("Quantidade de linhas:", len(df))
+        st.write("Quantidade de colunas:", len(df.columns))
+
+        st.subheader("Pré-visualização")
+        st.dataframe(df.head(20), use_container_width=True)
+
+        csv = df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Baixar CSV Perfil",
+            data=csv,
+            file_name="perfil_tratado.csv",
+            mime="text/csv"
+        )
 
 # =========================
-# SALDO
+# UPLOAD SALDO
 # =========================
 
 elif pagina == "Upload Saldo":
@@ -214,17 +185,30 @@ elif pagina == "Upload Saldo":
 
         df = carregar_dataframe(file)
 
-        st.success("Arquivo carregado com sucesso!")
-        st.write("Pré-visualização:")
-        st.dataframe(df.head())
+        st.success("Arquivo Saldo carregado com sucesso!")
+
+        st.write("Quantidade de linhas:", len(df))
+        st.write("Quantidade de colunas:", len(df.columns))
+
+        st.subheader("Pré-visualização")
+        st.dataframe(df.head(20), use_container_width=True)
+
+        csv = df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Baixar CSV Saldo",
+            data=csv,
+            file_name="saldo_tratado.csv",
+            mime="text/csv"
+        )
 
 # =========================
-# PARÂMETROS
+# UPLOAD PARÂMETROS
 # =========================
 
 elif pagina == "Upload Parâmetros":
 
-    st.header("Upload Parâmetros")
+    st.header("Upload de Parâmetros")
 
     file = st.file_uploader(
         "Selecione o arquivo de Parâmetros",
@@ -235,20 +219,33 @@ elif pagina == "Upload Parâmetros":
 
         df = carregar_dataframe(file)
 
-        st.success("Arquivo carregado com sucesso!")
-        st.write("Pré-visualização:")
-        st.dataframe(df.head())
+        st.success("Arquivo Parâmetros carregado com sucesso!")
+
+        st.write("Quantidade de linhas:", len(df))
+        st.write("Quantidade de colunas:", len(df.columns))
+
+        st.subheader("Pré-visualização")
+        st.dataframe(df.head(20), use_container_width=True)
+
+        csv = df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Baixar CSV Parâmetros",
+            data=csv,
+            file_name="parametros_tratado.csv",
+            mime="text/csv"
+        )
 
 # =========================
-# PREVISÃO PRODUÇÃO
+# UPLOAD PREVISÃO PRODUÇÃO
 # =========================
 
 elif pagina == "Upload Previsão Produção":
 
-    st.header("Upload Previsão Produção")
+    st.header("Upload Previsão de Produção")
 
     file = st.file_uploader(
-        "Selecione o arquivo de Previsão",
+        "Selecione o arquivo de Previsão Produção",
         type=["xlsx", "xls", "csv"]
     )
 
@@ -256,6 +253,20 @@ elif pagina == "Upload Previsão Produção":
 
         df = carregar_dataframe(file)
 
-        st.success("Arquivo carregado com sucesso!")
-        st.write("Pré-visualização:")
-        st.dataframe(df.head())
+        st.success("Arquivo Previsão Produção carregado com sucesso!")
+
+        st.write("Quantidade de linhas:", len(df))
+        st.write("Quantidade de colunas:", len(df.columns))
+
+        st.subheader("Pré-visualização")
+        st.dataframe(df.head(20), use_container_width=True)
+
+        csv = df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Baixar CSV Previsão",
+            data=csv,
+            file_name="previsao_producao_tratada.csv",
+            mime="text/csv"
+        )
+```
