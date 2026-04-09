@@ -15,20 +15,19 @@ def agora():
     return datetime.now(fuso)
 
 # ==========================================================
-# 🔥 LEITURA CSV ROBUSTA (RESOLVE TODOS ERROS)
+# 🔥 LEITURA ROBUSTA CSV
 # ==========================================================
 def ler_csv_seguro(file):
     try:
-        return pd.read_csv(file, sep=None, engine="python", encoding="latin-1")
+        return pd.read_csv(file, sep=None, engine="python", encoding="latin-1", on_bad_lines="skip")
     except:
         try:
-            return pd.read_csv(file, sep=";", encoding="latin-1")
+            return pd.read_csv(file, sep=";", encoding="latin-1", on_bad_lines="skip")
         except:
             try:
-                return pd.read_csv(file, sep=",", encoding="latin-1")
+                return pd.read_csv(file, sep=",", encoding="latin-1", on_bad_lines="skip")
             except:
-                st.error("❌ Erro ao ler CSV")
-                st.stop()
+                return pd.DataFrame()
 
 # ==========================================================
 # SALVAR CSV
@@ -57,191 +56,15 @@ abas = st.tabs([
     "📄 Ordens",
     "📅 Previsão",
     "⚙️ Parâmetros",
-    "📋 Base",
-    "📊 Dashboard"
+    "📋 Base de Dados",
+    "📊 Dashboard PCP"
 ])
 
 # ==========================================================
-# SALDO
-# ==========================================================
-with abas[0]:
-    st.title("📦 Saldo")
-
-    file = st.file_uploader("PDF Saldo", type=["pdf"])
-
-    if file:
-        with open("saldo_temp.pdf", "wb") as f:
-            f.write(file.read())
-
-        if st.button("Processar Saldo"):
-            linhas = []
-
-            with pdfplumber.open("saldo_temp.pdf") as pdf:
-                for p in pdf.pages:
-                    texto = p.extract_text()
-                    if texto:
-                        linhas.extend(texto.split("\n"))
-
-            dados = {}
-            codigo_atual = None
-
-            for linha in linhas:
-                codigo_match = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
-
-                if codigo_match:
-                    codigo_atual = codigo_match.group(1)
-                    if codigo_atual not in dados:
-                        dados[codigo_atual] = {
-                            "Codigo": codigo_atual,
-                            "Saldo Total": 0,
-                            "Saldo Almox 3": 0
-                        }
-                    continue
-
-                if "ALMOXARIFADO" in linha.upper() and codigo_atual:
-                    nums = re.findall(r'[\d\.]+\,\d+', linha)
-                    if nums:
-                        valor = float(nums[-1].replace(".", "").replace(",", "."))
-                        dados[codigo_atual]["Saldo Total"] += valor
-                        dados[codigo_atual]["Saldo Almox 3"] = valor
-
-            df = pd.DataFrame(dados.values())
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
-
-            salvar_csv(df, "saldo.csv")
-
-            st.success("Saldo processado!")
-            st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# PERFIL
-# ==========================================================
-with abas[1]:
-    st.title("📊 Perfil")
-
-    file = st.file_uploader("PDF Perfil", type=["pdf"])
-
-    if file:
-        with open("perfil_temp.pdf", "wb") as f:
-            f.write(file.read())
-
-        if st.button("Processar Perfil"):
-
-            movimentacoes = []
-            codigo_item = ""
-
-            regex = re.compile(r'(DD|DC|DP).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+)')
-
-            with pdfplumber.open("perfil_temp.pdf") as pdf:
-                for p in pdf.pages:
-                    texto = p.extract_text()
-                    if texto:
-                        for linha in texto.split("\n"):
-                            item_match = re.search(r'Item:\s*(\S+)', linha)
-                            if item_match:
-                                codigo_item = item_match.group(1)
-
-                            mov = regex.search(linha)
-                            if mov:
-                                movimentacoes.append({
-                                    "Item": codigo_item,
-                                    "Tipo": mov.group(1),
-                                    "Quantidade": mov.group(3)
-                                })
-
-            df = pd.DataFrame(movimentacoes)
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-
-            salvar_csv(df, "perfil.csv")
-
-            st.success("Perfil processado!")
-            st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# ORDENS
-# ==========================================================
-with abas[2]:
-    st.title("📄 Ordens")
-
-    file = st.file_uploader("CSV Ordens", type=["csv"])
-
-    if file:
-        conteudo = file.read().decode("latin-1", errors="ignore")
-        df = ler_csv_seguro(StringIO(conteudo))
-
-        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-
-        salvar_csv(df, "ordens.csv")
-
-        st.success("Ordens carregadas!")
-        st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# PREVISÃO
-# ==========================================================
-with abas[3]:
-    st.title("📅 Previsão")
-
-    file = st.file_uploader("Excel Previsão", type=["xlsx"])
-
-    if file:
-        df = pd.read_excel(file)
-        df.columns = df.columns.astype(str).str.upper()
-
-        col_cod = [c for c in df.columns if "COD" in c][0]
-        col_prod = [c for c in df.columns if "PROD" in c][0]
-
-        df = df[[col_cod, col_prod]]
-        df.columns = ["COD", "PRODUTO"]
-
-        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-
-        salvar_csv(df, "previsao.csv")
-
-        st.success("Previsão carregada!")
-        st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# PARÂMETROS
-# ==========================================================
-with abas[4]:
-    st.title("⚙️ Parâmetros")
-
-    file = st.file_uploader("Arquivo Parâmetros", type=None)
-
-    if file:
-        try:
-            try:
-                df = pd.read_excel(file)
-            except:
-                df = ler_csv_seguro(file)
-
-            df.columns = df.columns.astype(str).str.upper()
-
-            col_cod = [c for c in df.columns if "COD" in c][0]
-            col_seg = [c for c in df.columns if "SEG" in c or "ESTO" in c][0]
-
-            df = df[[col_cod, col_seg]]
-            df.columns = ["COD", "ESTQ SEG"]
-
-            df["ESTQ SEG"] = pd.to_numeric(df["ESTQ SEG"], errors="coerce").fillna(0)
-
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-
-            salvar_csv(df, "parametros.csv")
-
-            st.success("Parâmetros carregados!")
-            st.dataframe(df)
-
-        except Exception as e:
-            st.error(f"Erro: {e}")
-
-# ==========================================================
-# BASE
+# BASE DE DADOS (VISUALIZAÇÃO)
 # ==========================================================
 with abas[5]:
-    st.title("📋 Base")
+    st.title("📋 Base de Dados")
 
     if st.button("🗑 Limpar Base"):
         limpar_base()
@@ -252,27 +75,39 @@ with abas[5]:
 
         if os.path.exists(arq):
             df = ler_csv_seguro(arq)
-            st.dataframe(df)
+            st.dataframe(df, use_container_width=True)
         else:
             st.warning("Sem dados")
 
 # ==========================================================
-# DASHBOARD
+# DASHBOARD COMPLETO (IGUAL POWER BI)
 # ==========================================================
 with abas[6]:
     st.title("📊 Dashboard PCP")
 
-    if not os.path.exists("saldo.csv"):
-        st.warning("Faça upload dos dados")
-        st.stop()
+    arquivos = ["saldo.csv","perfil.csv","previsao.csv"]
+
+    for arq in arquivos:
+        if not os.path.exists(arq):
+            st.warning("Faça upload dos dados primeiro")
+            st.stop()
 
     saldo = ler_csv_seguro("saldo.csv")
     perfil = ler_csv_seguro("perfil.csv")
     previsao = ler_csv_seguro("previsao.csv")
 
-    base = previsao.rename(columns={"COD":"Codigo","PRODUTO":"Descricao"})
-    saldo = saldo.drop_duplicates("Codigo")
+    # 🔥 FILTRO POR DATA (IGUAL POWER BI)
+    datas = sorted(saldo["Data Processamento"].dropna().unique())
+    data_sel = st.selectbox("📅 Data", datas)
 
+    saldo = saldo[saldo["Data Processamento"] == data_sel].drop_duplicates("Codigo")
+    perfil = perfil[perfil["Data Processamento"] == data_sel]
+    previsao = previsao[previsao["Data Processamento"] == data_sel].drop_duplicates("COD")
+
+    base = previsao.rename(columns={"COD":"Codigo","PRODUTO":"Descricao"})
+    saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
+
+    # 🔥 TRATAR NUMERO
     perfil["Quantidade"] = (
         perfil["Quantidade"].astype(str)
         .str.replace(".", "")
@@ -280,13 +115,17 @@ with abas[6]:
         .astype(float)
     )
 
+    # 🔥 DEMANDA DC
     dc = perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
     dc.columns = ["Codigo","Demanda"]
 
-    df = base.merge(saldo, on="Codigo", how="left")
+    # 🔥 JOIN
+    df = base.merge(saldo_base, on="Codigo", how="left")
     df = df.merge(dc, on="Codigo", how="left")
 
     df = df.fillna(0)
+
+    # 🔥 MÉTRICAS
     df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda"]
 
     def status(x):
@@ -299,4 +138,31 @@ with abas[6]:
 
     df["Status"] = df["Saldo vs Demanda"].apply(status)
 
+    # ======================================================
+    # 🎯 CARDS INTERATIVOS
+    # ======================================================
+    if "filtro" not in st.session_state:
+        st.session_state.filtro = "TODOS"
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    if col1.button(f"🔴 FALTA ({(df['Status']=='🔴 FALTA').sum()})"):
+        st.session_state.filtro = "🔴 FALTA"
+
+    if col2.button(f"🟡 RISCO ({(df['Status']=='🟡 RISCO').sum()})"):
+        st.session_state.filtro = "🟡 RISCO"
+
+    if col3.button(f"🟢 OK ({(df['Status']=='🟢 OK').sum()})"):
+        st.session_state.filtro = "🟢 OK"
+
+    if col4.button("🔄 LIMPAR"):
+        st.session_state.filtro = "TODOS"
+
+    # 🔥 FILTRO
+    if st.session_state.filtro != "TODOS":
+        df = df[df["Status"] == st.session_state.filtro]
+
+    # ======================================================
+    # 🎨 TABELA FINAL (IGUAL POWER BI)
+    # ======================================================
     st.dataframe(df, use_container_width=True)
