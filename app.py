@@ -290,6 +290,73 @@ if pagina == "📊 Análise PCP":
     df = base.merge(saldo_base, on="Codigo", how="left")
     df = df.merge(demanda, on="Codigo", how="left")
 
-    df = df.fillna(0)
+    # =========================
+# TRATAMENTO FINAL
+# =========================
+df["Saldo Total"] = df["Saldo Total"].fillna(0)
+df["Saldo Almox 3"] = df["Saldo Almox 3"].fillna(0)
+df["Demanda Pedido"] = df["Demanda Pedido"].fillna(0)
 
-    st.dataframe(df, use_container_width=True)
+# =========================
+# CÁLCULOS
+# =========================
+
+# SALDO VS DEMANDA
+df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+
+# SUGESTÃO PRODUÇÃO
+df["Sugestão Produção"] = df["Demanda Pedido"] - df["Saldo Almox 3"]
+df["Sugestão Produção"] = df["Sugestão Produção"].apply(lambda x: max(x, 0))
+
+# STATUS (IGUAL POWER BI)
+def definir_status(row):
+    if row["Saldo vs Demanda"] < 0:
+        return "⛔ FALTA"
+    elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+        return "⚠️ RISCO"
+    else:
+        return "✅ OK"
+
+df["Status"] = df.apply(definir_status, axis=1)
+
+# =========================
+# CORES
+# =========================
+def cor_status(val):
+    if "OK" in val:
+        return "background-color: #c6efce; color: #006100"
+    elif "RISCO" in val:
+        return "background-color: #ffeb9c; color: #9c5700"
+    elif "FALTA" in val:
+        return "background-color: #ffc7ce; color: #9c0006"
+
+# =========================
+# CARDS
+# =========================
+col1, col2, col3 = st.columns(3)
+
+col1.metric("⛔ FALTA", len(df[df["Status"].str.contains("FALTA")]))
+col2.metric("⚠️ RISCO", len(df[df["Status"].str.contains("RISCO")]))
+col3.metric("✅ OK", len(df[df["Status"].str.contains("OK")]))
+
+st.divider()
+
+# =========================
+# TABELA FINAL
+# =========================
+st.subheader("📋 Análise de Estoque")
+
+tabela = df[[
+    "Codigo",
+    "Descricao",
+    "Saldo Total",
+    "Saldo Almox 3",
+    "Demanda Pedido",
+    "Sugestão Produção",
+    "Status"
+]]
+
+st.dataframe(
+    tabela.style.applymap(cor_status, subset=["Status"]),
+    use_container_width=True
+)
