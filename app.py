@@ -30,7 +30,7 @@ def ler_csv_seguro(file):
                 return pd.DataFrame()
 
 # ==========================================================
-# SALVAR CSV
+# SALVAR
 # ==========================================================
 def salvar_csv(df, nome):
     if os.path.exists(nome):
@@ -39,7 +39,7 @@ def salvar_csv(df, nome):
     df.to_csv(nome, index=False)
 
 # ==========================================================
-# LIMPAR BASE
+# LIMPAR
 # ==========================================================
 def limpar_base():
     for arq in ["saldo.csv","perfil.csv","ordens.csv","previsao.csv","parametros.csv"]:
@@ -47,35 +47,33 @@ def limpar_base():
             os.remove(arq)
 
 # ==========================================================
-# ABAS (TOPO)
+# MENU
 # ==========================================================
-abas = st.tabs([
-    "📦 Saldo",
-    "📊 Perfil",
-    "📄 Ordens",
-    "📅 Previsão",
-    "⚙️ Parâmetros",
-    "📋 Base",
-    "📊 Dashboard"
+pagina = st.sidebar.radio("Menu",[
+    "Upload Saldo",
+    "Upload Perfil",
+    "Upload Ordens",
+    "Upload Previsão",
+    "Upload Parâmetros",
+    "Base de Dados",
+    "Dashboard PCP"
 ])
 
 # ==========================================================
-# SALDO
+# UPLOAD SALDO
 # ==========================================================
-with abas[0]:
-    st.title("📦 Saldo")
-
+if pagina == "Upload Saldo":
     file = st.file_uploader("PDF Saldo", type=["pdf"])
 
     if file:
         with open("saldo.pdf","wb") as f:
             f.write(file.read())
 
-        if st.button("Processar Saldo"):
-            linhas=[]
+        if st.button("Processar"):
+            linhas = []
             with pdfplumber.open("saldo.pdf") as pdf:
                 for p in pdf.pages:
-                    texto=p.extract_text()
+                    texto = p.extract_text()
                     if texto:
                         linhas.extend(texto.split("\n"))
 
@@ -83,14 +81,14 @@ with abas[0]:
             cod=None
 
             for linha in linhas:
-                m=re.search(r'\b([A-Z]{1,3}\d{3,5})\b',linha)
+                m = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
                 if m:
                     cod=m.group(1)
                     dados[cod]={"Codigo":cod,"Saldo Total":0,"Saldo Almox 3":0}
                     continue
 
                 if "ALMOXARIFADO" in linha.upper() and cod:
-                    nums=re.findall(r'[\d\.]+\,\d+',linha)
+                    nums=re.findall(r'[\d\.]+\,\d+', linha)
                     if nums:
                         v=float(nums[-1].replace(".","").replace(",","."))
                         dados[cod]["Saldo Total"]+=v
@@ -98,23 +96,21 @@ with abas[0]:
 
             df=pd.DataFrame(dados.values())
             df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
             salvar_csv(df,"saldo.csv")
+
             st.dataframe(df)
 
 # ==========================================================
-# PERFIL
+# UPLOAD PERFIL
 # ==========================================================
-with abas[1]:
-    st.title("📊 Perfil")
-
+elif pagina == "Upload Perfil":
     file = st.file_uploader("PDF Perfil", type=["pdf"])
 
     if file:
         with open("perfil.pdf","wb") as f:
             f.write(file.read())
 
-        if st.button("Processar Perfil"):
+        if st.button("Processar"):
             dados=[]
             item=""
 
@@ -139,88 +135,71 @@ with abas[1]:
 
             df=pd.DataFrame(dados)
             df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
             salvar_csv(df,"perfil.csv")
+
             st.dataframe(df)
 
 # ==========================================================
 # ORDENS
 # ==========================================================
-with abas[2]:
-    st.title("📄 Ordens")
-
+elif pagina == "Upload Ordens":
     file = st.file_uploader("CSV", type=["csv"])
 
     if file:
         conteudo=file.read().decode("latin-1",errors="ignore")
         df=ler_csv_seguro(StringIO(conteudo))
         df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
         salvar_csv(df,"ordens.csv")
         st.dataframe(df)
 
 # ==========================================================
 # PREVISÃO
 # ==========================================================
-with abas[3]:
-    st.title("📅 Previsão")
-
+elif pagina == "Upload Previsão":
     file = st.file_uploader("Excel", type=["xlsx"])
 
     if file:
         df=pd.read_excel(file)
-        df.columns=df.columns.astype(str).str.upper()
+        df.columns=df.columns.str.upper()
 
-        col_cod=[c for c in df.columns if "COD" in c][0]
-        col_desc=[c for c in df.columns if "PROD" in c or "DESC" in c][0]
-
-        df=df[[col_cod,col_desc]]
-        df.columns=["COD","DESCRICAO"]
+        df=df[[c for c in df.columns if "COD" in c or "PROD" in c]]
+        df.columns=["COD","PRODUTO"]
 
         df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
         salvar_csv(df,"previsao.csv")
+
         st.dataframe(df)
 
 # ==========================================================
-# PARÂMETROS (AJUSTADO PARA SUA PLANILHA)
+# PARÂMETROS
 # ==========================================================
-with abas[4]:
-    st.title("⚙️ Parâmetros")
-
-    file = st.file_uploader("Arquivo Parâmetros", type=["xlsx","csv"])
+elif pagina == "Upload Parâmetros":
+    file = st.file_uploader("Arquivo", type=None)
 
     if file:
         try:
             df=pd.read_excel(file)
+        except:
+            df=ler_csv_seguro(file)
 
-            df.columns=df.columns.astype(str).str.upper()
+        df.columns=df.columns.str.upper()
 
-            col_cod = [c for c in df.columns if "COD" in c][0]
-            col_seg = [c for c in df.columns if "ESTQ" in c][0]
+        col_cod=[c for c in df.columns if "COD" in c][0]
+        col_seg=[c for c in df.columns if "SEG" in c or "ESTO" in c][0]
 
-            df = df[[col_cod, col_seg]]
-            df.columns = ["COD","ESTQ SEG"]
+        df=df[[col_cod,col_seg]]
+        df.columns=["COD","ESTQ SEG"]
 
-            df["ESTQ SEG"]=pd.to_numeric(df["ESTQ SEG"],errors="coerce").fillna(0)
+        df["Data Processamento"]=agora().strftime("%d/%m/%Y")
+        salvar_csv(df,"parametros.csv")
 
-            df["Data Processamento"]=agora().strftime("%d/%m/%Y")
-
-            salvar_csv(df,"parametros.csv")
-
-            st.success("Parâmetros carregados!")
-            st.dataframe(df)
-
-        except Exception as e:
-            st.error(f"Erro: {e}")
+        st.dataframe(df)
 
 # ==========================================================
 # BASE
 # ==========================================================
-with abas[5]:
-    st.title("📋 Base")
-
-    if st.button("🗑 Limpar Base"):
+elif pagina == "Base de Dados":
+    if st.button("Limpar Base"):
         limpar_base()
 
     for arq in ["saldo.csv","perfil.csv","ordens.csv","previsao.csv","parametros.csv"]:
@@ -231,46 +210,40 @@ with abas[5]:
 # ==========================================================
 # DASHBOARD FINAL
 # ==========================================================
-with abas[6]:
-    st.title("📊 Dashboard PCP")
+elif pagina == "Dashboard PCP":
 
     saldo=ler_csv_seguro("saldo.csv")
     perfil=ler_csv_seguro("perfil.csv")
     previsao=ler_csv_seguro("previsao.csv")
 
     datas=saldo["Data Processamento"].unique()
-    data_sel=st.selectbox("📅 Data",datas)
+    data_sel=st.selectbox("Data",datas)
 
     saldo=saldo[saldo["Data Processamento"]==data_sel]
     perfil=perfil[perfil["Data Processamento"]==data_sel]
     previsao=previsao[previsao["Data Processamento"]==data_sel]
 
-    base=previsao.rename(columns={"COD":"Codigo","DESCRICAO":"Descricao"})
+    base=previsao.rename(columns={"COD":"Codigo","PRODUTO":"Descricao"})
+    perfil["Quantidade"]=perfil["Quantidade"].str.replace(".","").str.replace(",",".").astype(float)
 
-    perfil["Quantidade"]=perfil["Quantidade"].astype(str)\
-        .str.replace(".","").str.replace(",",".").astype(float)
-
-    # DEMANDA DC
     dc=perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
     dc.columns=["Codigo","Demanda Pedido"]
 
-    # DEMANDA DP TOTAL
     dp=perfil[perfil["Tipo"]=="DP"].groupby("Item")["Quantidade"].sum().reset_index()
     dp.columns=["Codigo","Demanda DP"]
 
-    # DEMANDA DP SEMANA
     semana=str(datetime.now().isocalendar()[1]).zfill(2)
     perfil["Semana"]=pd.to_datetime(perfil["Data Processamento"],dayfirst=True).dt.isocalendar().week.astype(str).str.zfill(2)
 
-    dp_sem=perfil[(perfil["Tipo"]=="DP")&(perfil["Semana"]==semana)]\
+    dp_semana=perfil[(perfil["Tipo"]=="DP") & (perfil["Semana"]==semana)]\
         .groupby("Item")["Quantidade"].sum().reset_index()
 
-    dp_sem.columns=["Codigo","DP Semana"]
+    dp_semana.columns=["Codigo","DP Semana"]
 
     df=base.merge(saldo,on="Codigo",how="left")\
            .merge(dc,on="Codigo",how="left")\
            .merge(dp,on="Codigo",how="left")\
-           .merge(dp_sem,on="Codigo",how="left")
+           .merge(dp_semana,on="Codigo",how="left")
 
     df=df.fillna(0)
 
