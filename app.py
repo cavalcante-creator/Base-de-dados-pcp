@@ -15,7 +15,7 @@ def agora():
     return datetime.now(fuso)
 
 # ==========================================================
-# SALVAR CSV
+# SALVAR CSV COM HISTÓRICO
 # ==========================================================
 def salvar_csv(df, nome):
     if os.path.exists(nome):
@@ -173,16 +173,8 @@ with abas[3]:
     file = st.file_uploader("Excel Previsão", type=["xlsx"])
 
     if file:
-        df_raw = pd.read_excel(file, header=None)
-
-        linha_header = None
-        for i in range(len(df_raw)):
-            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
-                linha_header = i
-                break
-
-        df = pd.read_excel(file, header=linha_header)
-        df.columns = df.columns.astype(str).str.upper()
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.upper()
 
         col_cod = [c for c in df.columns if "COD" in c][0]
         col_prod = [c for c in df.columns if "PROD" in c][0]
@@ -199,7 +191,7 @@ with abas[3]:
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# PARÂMETROS (ROBUSTO)
+# PARÂMETROS
 # ==========================================================
 with abas[4]:
     st.title("⚙️ Parâmetros")
@@ -207,43 +199,22 @@ with abas[4]:
     file = st.file_uploader("Excel Parâmetros", type=["xlsx"])
 
     if file:
-        try:
-            df_raw = pd.read_excel(file, header=None)
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.upper()
 
-            linha_header = None
-            for i in range(len(df_raw)):
-                valores = df_raw.iloc[i].astype(str).str.upper().values
-                if any("COD" in v for v in valores):
-                    linha_header = i
-                    break
+        col_cod = [c for c in df.columns if "COD" in c][0]
+        col_seg = [c for c in df.columns if "SEG" in c or "ESTQ" in c][0]
 
-            df = pd.read_excel(file, header=linha_header)
-            df.columns = df.columns.astype(str).str.upper()
+        df = df[[col_cod, col_seg]]
+        df.columns = ["COD", "ESTQ SEG"]
 
-            col_cod = None
-            col_seg = None
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-            for c in df.columns:
-                if "COD" in c:
-                    col_cod = c
-                if "SEG" in c or "ESTO" in c:
-                    col_seg = c
+        salvar_csv(df, "parametros.csv")
 
-            df = df[[col_cod, col_seg]]
-            df.columns = ["COD", "ESTQ SEG"]
-
-            df["ESTQ SEG"] = pd.to_numeric(df["ESTQ SEG"], errors="coerce").fillna(0)
-
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
-
-            salvar_csv(df, "parametros.csv")
-
-            st.success("Parâmetros carregados!")
-            st.dataframe(df, use_container_width=True)
-
-        except Exception as e:
-            st.error(e)
+        st.success("Parâmetros carregados!")
+        st.dataframe(df, use_container_width=True)
 
 # ==========================================================
 # BASE DE DADOS
@@ -251,7 +222,7 @@ with abas[4]:
 with abas[5]:
     st.title("📋 Base de Dados")
 
-    if st.button("🗑 Limpar Base"):
+    if st.button("🗑 Limpar Base de Dados"):
         limpar_base()
         st.success("Base limpa!")
 
@@ -270,25 +241,31 @@ with abas[5]:
 with abas[6]:
     st.title("📊 Análise PCP")
 
-    arquivos = ["saldo.csv","perfil.csv","previsao.csv","parametros.csv"]
-
-    for arq in arquivos:
-        if not os.path.exists(arq):
-            st.warning("Faça upload dos dados primeiro")
-            st.stop()
-
-    saldo = pd.read_csv("saldo.csv")
-    perfil = pd.read_csv("perfil.csv")
-    previsao = pd.read_csv("previsao.csv")
-    parametros = pd.read_csv("parametros.csv")
+    try:
+        saldo = pd.read_csv("saldo.csv")
+        perfil = pd.read_csv("perfil.csv")
+        previsao = pd.read_csv("previsao.csv")
+        parametros = pd.read_csv("parametros.csv")
+    except:
+        st.warning("Faça upload dos dados primeiro")
+        st.stop()
 
     datas = sorted(saldo["Data Processamento"].dropna().unique())
     data_sel = st.selectbox("📅 Data", datas)
 
-    saldo = saldo[saldo["Data Processamento"] == data_sel].drop_duplicates("Codigo")
+    saldo = saldo[saldo["Data Processamento"] == data_sel]\
+        .sort_values("Hora Processamento", ascending=False)\
+        .drop_duplicates("Codigo")
+
     perfil = perfil[perfil["Data Processamento"] == data_sel]
-    previsao = previsao[previsao["Data Processamento"] == data_sel].drop_duplicates("COD")
-    parametros = parametros[parametros["Data Processamento"] == data_sel].drop_duplicates("COD")
+
+    previsao = previsao[previsao["Data Processamento"] == data_sel]\
+        .sort_values("Hora Processamento", ascending=False)\
+        .drop_duplicates("COD")
+
+    parametros = parametros[parametros["Data Processamento"] == data_sel]\
+        .sort_values("Hora Processamento", ascending=False)\
+        .drop_duplicates("COD")
 
     base = previsao.rename(columns={"COD": "Codigo", "PRODUTO": "Descricao"})
     saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
@@ -323,24 +300,25 @@ with abas[6]:
     df["Status"] = df["Saldo vs Demanda"].apply(status)
 
     # FILTRO POR CARD
-    if "filtro" not in st.session_state:
-        st.session_state.filtro = "TODOS"
+    if "filtro_status" not in st.session_state:
+        st.session_state.filtro_status = "TODOS"
 
     col1, col2, col3, col4 = st.columns(4)
 
     if col1.button(f"🔴 FALTA ({(df['Status']=='🔴 FALTA').sum()})"):
-        st.session_state.filtro = "🔴 FALTA"
+        st.session_state.filtro_status = "🔴 FALTA"
 
     if col2.button(f"🟡 RISCO ({(df['Status']=='🟡 RISCO').sum()})"):
-        st.session_state.filtro = "🟡 RISCO"
+        st.session_state.filtro_status = "🟡 RISCO"
 
     if col3.button(f"🟢 OK ({(df['Status']=='🟢 OK').sum()})"):
-        st.session_state.filtro = "🟢 OK"
+        st.session_state.filtro_status = "🟢 OK"
 
-    if col4.button("🔄 LIMPAR"):
-        st.session_state.filtro = "TODOS"
+    if col4.button("🔄 LIMPAR FILTRO"):
+        st.session_state.filtro_status = "TODOS"
 
-    if st.session_state.filtro != "TODOS":
-        df = df[df["Status"] == st.session_state.filtro]
+    if st.session_state.filtro_status != "TODOS":
+        df = df[df["Status"] == st.session_state.filtro_status]
 
+    st.divider()
     st.dataframe(df, use_container_width=True)
