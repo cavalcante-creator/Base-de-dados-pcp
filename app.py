@@ -1,4 +1,6 @@
-# SUBSTITUA TODO O BLOCO "Upload Parâmetros" POR ESTE:
+# ==========================================================
+# PARÂMETROS
+# ==========================================================
 
 if pagina == "Upload Parâmetros":
 
