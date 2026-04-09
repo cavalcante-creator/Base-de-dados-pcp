@@ -47,7 +47,7 @@ def limpar_base():
             os.remove(arq)
 
 # ==========================================================
-# ABAS
+# ABAS (TOPO)
 # ==========================================================
 abas = st.tabs([
     "📦 Saldo",
@@ -183,30 +183,24 @@ with abas[3]:
         st.dataframe(df)
 
 # ==========================================================
-# PARÂMETROS
+# PARÂMETROS (AJUSTADO PARA SUA PLANILHA)
 # ==========================================================
 with abas[4]:
     st.title("⚙️ Parâmetros")
 
-    file = st.file_uploader("Arquivo Parâmetros", type=None)
+    file = st.file_uploader("Arquivo Parâmetros", type=["xlsx","csv"])
 
     if file:
         try:
-            try:
-                df = pd.read_excel(file, engine="openpyxl")
-            except:
-                try:
-                    df = pd.read_excel(file, engine="xlrd")
-                except:
-                    df = ler_csv_seguro(file)
+            df=pd.read_excel(file)
 
             df.columns=df.columns.astype(str).str.upper()
 
-            col_cod=[c for c in df.columns if "COD" in c][0]
-            col_seg=[c for c in df.columns if "ESTQ" in c][0]
+            col_cod = [c for c in df.columns if "COD" in c][0]
+            col_seg = [c for c in df.columns if "ESTQ" in c][0]
 
-            df=df[[col_cod,col_seg]]
-            df.columns=["COD","ESTQ SEG"]
+            df = df[[col_cod, col_seg]]
+            df.columns = ["COD","ESTQ SEG"]
 
             df["ESTQ SEG"]=pd.to_numeric(df["ESTQ SEG"],errors="coerce").fillna(0)
 
@@ -233,24 +227,18 @@ with abas[5]:
         st.subheader(arq)
         if os.path.exists(arq):
             st.dataframe(ler_csv_seguro(arq))
-        else:
-            st.warning("Sem dados")
 
 # ==========================================================
-# DASHBOARD
+# DASHBOARD FINAL
 # ==========================================================
 with abas[6]:
     st.title("📊 Dashboard PCP")
-
-    if not os.path.exists("saldo.csv"):
-        st.warning("Faça upload dos dados")
-        st.stop()
 
     saldo=ler_csv_seguro("saldo.csv")
     perfil=ler_csv_seguro("perfil.csv")
     previsao=ler_csv_seguro("previsao.csv")
 
-    datas=saldo["Data Processamento"].dropna().unique()
+    datas=saldo["Data Processamento"].unique()
     data_sel=st.selectbox("📅 Data",datas)
 
     saldo=saldo[saldo["Data Processamento"]==data_sel]
@@ -262,20 +250,22 @@ with abas[6]:
     perfil["Quantidade"]=perfil["Quantidade"].astype(str)\
         .str.replace(".","").str.replace(",",".").astype(float)
 
+    # DEMANDA DC
     dc=perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
     dc.columns=["Codigo","Demanda Pedido"]
 
+    # DEMANDA DP TOTAL
     dp=perfil[perfil["Tipo"]=="DP"].groupby("Item")["Quantidade"].sum().reset_index()
     dp.columns=["Codigo","Demanda DP"]
 
+    # DEMANDA DP SEMANA
     semana=str(datetime.now().isocalendar()[1]).zfill(2)
-    perfil["Semana"]=pd.to_datetime(perfil["Data Processamento"],dayfirst=True)\
-        .dt.isocalendar().week.astype(str).str.zfill(2)
+    perfil["Semana"]=pd.to_datetime(perfil["Data Processamento"],dayfirst=True).dt.isocalendar().week.astype(str).str.zfill(2)
 
     dp_sem=perfil[(perfil["Tipo"]=="DP")&(perfil["Semana"]==semana)]\
         .groupby("Item")["Quantidade"].sum().reset_index()
 
-    dp_sem.columns=["Codigo","Demanda DP Semana"]
+    dp_sem.columns=["Codigo","DP Semana"]
 
     df=base.merge(saldo,on="Codigo",how="left")\
            .merge(dc,on="Codigo",how="left")\
@@ -293,15 +283,4 @@ with abas[6]:
 
     df["Status"]=df["Saldo vs Demanda"].apply(status)
 
-    df_final=df[[
-        "Codigo",
-        "Descricao",
-        "Saldo Total",
-        "Saldo Almox 3",
-        "Demanda Pedido",
-        "Status",
-        "Demanda DP",
-        "Demanda DP Semana"
-    ]]
-
-    st.dataframe(df_final, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
