@@ -163,8 +163,15 @@ with abas[3]:
         df = pd.read_excel(file)
         df.columns = df.columns.str.upper()
 
-        col_cod = [c for c in df.columns if "COD" in c][0]
-        col_prod = [c for c in df.columns if "PROD" in c][0]
+        col_cod_list = [c for c in df.columns if "COD" in c]
+        col_prod_list = [c for c in df.columns if "PROD" in c]
+
+        if not col_cod_list or not col_prod_list:
+            st.error(f"❌ Colunas não encontradas no arquivo. Colunas disponíveis: {list(df.columns)}")
+            st.stop()
+
+        col_cod = col_cod_list[0]
+        col_prod = col_prod_list[0]
 
         df = df[[col_cod, col_prod]]
         df.columns = ["COD", "PRODUTO"]
@@ -183,7 +190,6 @@ with abas[3]:
 with abas[4]:
     st.title("📋 Base de Dados (Último Upload)")
 
-    # BOTÃO LIMPAR BASE
     if st.button("🗑️ Limpar Base de Dados"):
         arquivos_para_remover = [
             "saldo.csv",
