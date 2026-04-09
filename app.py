@@ -1,181 +1,284 @@
 import streamlit as st
+import pdfplumber
 import pandas as pd
-import os
+import re
 from datetime import datetime
+import os
+from io import StringIO
 import pytz
 
-st.set_page_config(page_title="Base de Dados PCP", layout="wide")
+st.set_page_config(page_title="PCP Produção", layout="wide")
 
-# ==========================================================
-# FUNÇÃO DATA/HORA
-# ==========================================================
+# FUSO BRASIL
+fuso = pytz.timezone("America/Sao_Paulo")
 
 def agora():
-    fuso = pytz.timezone("America/Sao_Paulo")
-    data_atual = datetime.now(fuso)
-    return data_atual
+    return datetime.now(fuso)
 
 # ==========================================================
-# MENU LATERAL
+# MENU
 # ==========================================================
 
 pagina = st.sidebar.radio(
-    "Escolha uma opção:",
+    "Menu",
     [
+        "Upload Saldo Produção",
+        "Upload Perfil Produção",
         "Upload Ordens de Fabricação",
         "Upload Previsão Produção",
-        "Upload Perfil e Saldos",
         "Upload Parâmetros",
         "Gerar Excel"
     ]
 )
 
 # ==========================================================
-# UPLOAD ORDENS DE FABRICAÇÃO
+# SALDO
+# ==========================================================
+
+if pagina == "Upload Saldo Produção":
+
+    st.title("📦 Saldo Produção")
+    st.caption(f"📅 {agora().strftime('%d/%m/%Y')} | ⏰ {agora().strftime('%H:%M:%S')}")
+
+    file = st.file_uploader("PDF Saldo", type=["pdf"])
+
+    if file:
+
+        with open("saldo_temp.pdf", "wb") as f:
+            f.write(file.read())
+
+        if st.button("Processar Saldo"):
+
+            linhas = []
+            with pdfplumber.open("saldo_temp.pdf") as pdf:
+                for p in pdf.pages:
+                    texto = p.extract_text()
+                    if texto:
+                        linhas.extend(texto.split("\n"))
+
+            dados = {}
+            codigo_atual = None
+
+            for linha in linhas:
+                linha = linha.strip()
+                if not linha:
+                    continue
+
+                linha_upper = linha.upper()
+
+                codigo_match = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
+
+                if codigo_match:
+                    codigo_atual = codigo_match.group(1)
+
+                    descricao = linha.split(codigo_atual, 1)[1].strip()
+                    descricao = re.split(r'\s+\d+[.,]?\d*|\s+UN\b|\s+KG\b', descricao)[0].strip()
+
+                    if codigo_atual not in dados:
+                        dados[codigo_atual] = {
+                            "Codigo": codigo_atual,
+                            "Descricao": descricao,
+                            "Saldo Total": 0
+                        }
+                    continue
+
+                if "ALMOXARIFADO" in linha_upper and codigo_atual:
+
+                    almox_match = re.search(r'ALMOXARIFADO[:\s]+(\d+)', linha_upper)
+
+                    if almox_match:
+                        numero = almox_match.group(1)
+                        col = f"Saldo Almox {numero}"
+
+                        if col not in dados[codigo_atual]:
+                            dados[codigo_atual][col] = 0
+
+                        nums = re.findall(r'[\d\.]+\,\d+', linha)
+
+                        if nums:
+                            valor = float(nums[-1].replace(".", "").replace(",", "."))
+                            dados[codigo_atual][col] += valor
+                            dados[codigo_atual]["Saldo Total"] += valor
+
+            df = pd.DataFrame(dados.values())
+
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+            arquivo = "saldo.csv"
+
+            if os.path.exists(arquivo):
+                df_antigo = pd.read_csv(arquivo)
+                df = pd.concat([df_antigo, df], ignore_index=True)
+
+            df.to_csv(arquivo, index=False)
+
+            st.success("Saldo processado!")
+            st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# PERFIL
+# ==========================================================
+
+if pagina == "Upload Perfil Produção":
+
+    st.title("📊 Perfil Produção")
+    st.caption(f"📅 {agora().strftime('%d/%m/%Y')} | ⏰ {agora().strftime('%H:%M:%S')}")
+
+    file = st.file_uploader("PDF Perfil", type=["pdf"])
+
+    if file:
+
+        with open("perfil_temp.pdf", "wb") as f:
+            f.write(file.read())
+
+        if st.button("Processar Perfil"):
+
+            def extrair_numero(texto):
+                m = re.search(r'-?[\d,.]+', str(texto))
+                return m.group(0) if m else "0"
+
+            movimentacoes = []
+            codigo_item = ""
+
+            regex = re.compile(
+                r'(DD|DC|DP|OFP|OFA).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+).*?(-?[\d,.]+)'
+            )
+
+            with pdfplumber.open("perfil_temp.pdf") as pdf:
+                for p in pdf.pages:
+                    texto = p.extract_text()
+                    if texto:
+                        for linha in texto.split("\n"):
+
+                            item_match = re.search(r'Item:\s*(\S+)', linha)
+                            if item_match:
+                                codigo_item = item_match.group(1)
+
+                            mov = regex.search(linha)
+                            if mov:
+                                movimentacoes.append({
+                                    "Item": codigo_item,
+                                    "Tipo": mov.group(1),
+                                    "Data Fim": mov.group(2),
+                                    "Quantidade": extrair_numero(mov.group(3)),
+                                    "Estoque Projetado": extrair_numero(mov.group(4))
+                                })
+
+            df = pd.DataFrame(movimentacoes)
+
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+            arquivo = "perfil.csv"
+
+            if os.path.exists(arquivo):
+                df_antigo = pd.read_csv(arquivo)
+                df = pd.concat([df_antigo, df], ignore_index=True)
+
+            df.to_csv(arquivo, index=False)
+
+            st.success("Perfil processado!")
+            st.dataframe(df, use_container_width=True)
+
+# ==========================================================
+# ORDENS
 # ==========================================================
 
 if pagina == "Upload Ordens de Fabricação":
 
-    st.title("📦 Upload Ordens de Fabricação")
+    st.title("📄 Ordens de Fabricação")
 
-    arquivo_of = st.file_uploader(
-        "Selecione o arquivo de OF",
-        type=["xlsx", "xls", "csv"]
-    )
+    file = st.file_uploader("CSV Ordens", type=["csv"])
 
-    if arquivo_of:
-        st.success("Arquivo de OF carregado com sucesso!")
+    if file:
+
+        conteudo = file.read().decode("utf-8", errors="ignore")
+
+        df = pd.read_csv(StringIO(conteudo), sep=None, engine="python")
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        arquivo = "ordens.csv"
+
+        if os.path.exists(arquivo):
+            df_antigo = pd.read_csv(arquivo)
+            df = pd.concat([df_antigo, df], ignore_index=True)
+
+        df.to_csv(arquivo, index=False)
+
+        st.success("Ordens carregadas!")
+        st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# UPLOAD PREVISÃO PRODUÇÃO
+# PREVISÃO
 # ==========================================================
 
 if pagina == "Upload Previsão Produção":
 
-    st.title("📈 Upload Previsão Produção")
+    st.title("📅 Previsão Produção")
 
-    arquivo_prev = st.file_uploader(
-        "Selecione o arquivo de previsão",
-        type=["xlsx", "xls", "csv"]
-    )
+    file = st.file_uploader("Excel Previsão", type=["xlsx"])
 
-    if arquivo_prev:
-        st.success("Arquivo de previsão carregado com sucesso!")
+    if file:
 
-# ==========================================================
-# UPLOAD PERFIL E SALDOS
-# ==========================================================
+        df_raw = pd.read_excel(file, header=None)
 
-if pagina == "Upload Perfil e Saldos":
+        linha_header = None
+        for i in range(len(df_raw)):
+            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
+                linha_header = i
+                break
 
-    st.title("📋 Upload Perfil de Itens / Saldos")
+        df = pd.read_excel(file, header=linha_header)
+        df.columns = df.columns.astype(str).str.upper()
 
-    arquivo_saldos = st.file_uploader(
-        "Selecione o arquivo de Perfil de Itens",
-        type=["xlsx", "xls", "csv"]
-    )
+        col_cod = [c for c in df.columns if "COD" in c][0]
+        col_prod = [c for c in df.columns if "PROD" in c][0]
+        col_prev = [c for c in df.columns if "PREVIS" in c][0]
 
-    if arquivo_saldos:
+        df = df[[col_cod, col_prod, col_prev]]
+        df.columns = ["COD", "PRODUTO", "PREVISAO"]
 
-        try:
+        df["PREVISAO"] = pd.to_numeric(df["PREVISAO"], errors="coerce").fillna(0)
 
-            if arquivo_saldos.name.endswith(".csv"):
-                df_saldos = pd.read_csv(arquivo_saldos)
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-            else:
-                try:
-                    arquivo_saldos.seek(0)
-                    df_saldos = pd.read_excel(
-                        arquivo_saldos,
-                        engine="openpyxl"
-                    )
-                except:
-                    arquivo_saldos.seek(0)
-                    df_saldos = pd.read_excel(
-                        arquivo_saldos,
-                        engine="xlrd"
-                    )
+        arquivo = "previsao.csv"
 
-            df_saldos.columns = (
-                df_saldos.columns
-                .astype(str)
-                .str.upper()
-                .str.strip()
-            )
+        if os.path.exists(arquivo):
+            df_antigo = pd.read_csv(arquivo)
+            df = pd.concat([df_antigo, df], ignore_index=True)
 
-            colunas_saldo = [
-                "CODIGO",
-                "DESCRICAO",
-                "SALDO ALMOX 1",
-                "SALDO ALMOX 2",
-                "SALDO ALMOX 3",
-                "SALDO ALMOX 4",
-                "SALDO TOTAL"
-            ]
+        df.to_csv(arquivo, index=False)
 
-            colunas_existentes = [
-                c for c in colunas_saldo if c in df_saldos.columns
-            ]
-
-            if len(colunas_existentes) == 0:
-                st.error("Nenhuma coluna de saldo encontrada.")
-
-            else:
-
-                df_saldos = df_saldos[colunas_existentes]
-
-                df_saldos["Data Processamento"] = agora().strftime("%d/%m/%Y")
-                df_saldos["Hora Processamento"] = agora().strftime("%H:%M:%S")
-
-                arquivo_csv = "saldos.csv"
-
-                if os.path.exists(arquivo_csv):
-                    df_antigo = pd.read_csv(arquivo_csv)
-                    df_saldos = pd.concat(
-                        [df_antigo, df_saldos],
-                        ignore_index=True
-                    )
-
-                df_saldos.to_csv(arquivo_csv, index=False)
-
-                st.success("Saldos carregados com sucesso!")
-                st.dataframe(df_saldos, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Erro ao processar arquivo: {e}")
+        st.success("Previsão carregada!")
+        st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# UPLOAD PARÂMETROS
+# PARÂMETROS
 # ==========================================================
 
 if pagina == "Upload Parâmetros":
 
-    st.title("⚙️ Parâmetros Produção")
+    st.title("⚙️ Upload Parâmetros")
 
     file = st.file_uploader(
         "Excel Parâmetros",
-        type=["xls", "xlsx"],
-        accept_multiple_files=False
+        type=["xlsx", "xls"]
     )
 
     if file:
 
         try:
             file.seek(0)
-            df_raw = pd.read_excel(
-                file,
-                header=None,
-                engine="openpyxl"
-            )
+            df_raw = pd.read_excel(file, header=None, engine="openpyxl")
             engine_excel = "openpyxl"
-
         except:
             file.seek(0)
-            df_raw = pd.read_excel(
-                file,
-                header=None,
-                engine="xlrd"
-            )
+            df_raw = pd.read_excel(file, header=None, engine="xlrd")
             engine_excel = "xlrd"
 
         linha_header = None
@@ -256,42 +359,49 @@ if pagina == "Upload Parâmetros":
 
                 df.to_csv(arquivo, index=False)
 
-                st.success("Parâmetros carregados com sucesso!")
+                st.success("Parâmetros carregados!")
                 st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# GERAR EXCEL
+# GERAR EXCEL (COM HISTÓRICO)
 # ==========================================================
 
 if pagina == "Gerar Excel":
 
     st.title("📥 Gerar Excel")
 
-    if os.path.exists("parametros.csv"):
-        df_parametros = pd.read_csv("parametros.csv")
+    arquivos = {
+        "Saldo": "saldo.csv",
+        "Perfil": "perfil.csv",
+        "Ordens": "ordens.csv",
+        "Previsão": "previsao.csv",
+        "Parâmetros": "parametros.csv"
+    }
 
-        st.subheader("Parâmetros")
-        st.dataframe(df_parametros, use_container_width=True)
+    for nome, arquivo in arquivos.items():
 
-        st.download_button(
-            label="Baixar Parâmetros CSV",
-            data=df_parametros.to_csv(index=False).encode("utf-8"),
-            file_name="parametros_exportados.csv",
-            mime="text/csv"
-        )
+        if os.path.exists(arquivo):
 
-    if os.path.exists("saldos.csv"):
-        df_saldos = pd.read_csv("saldos.csv")
+            df = pd.read_csv(arquivo)
 
-        st.subheader("Saldos")
-        st.dataframe(df_saldos, use_container_width=True)
+            if "Data Processamento" in df.columns:
+                df = df.sort_values(
+                    by=["Data Processamento", "Hora Processamento"],
+                    ascending=False
+                )
 
-        st.download_button(
-            label="Baixar Saldos CSV",
-            data=df_saldos.to_csv(index=False).encode("utf-8"),
-            file_name="saldos_exportados.csv",
-            mime="text/csv"
-        )
+            st.subheader(nome)
+            st.dataframe(df, use_container_width=True)
 
-    if not os.path.exists("parametros.csv") and not os.path.exists("saldos.csv"):
-        st.warning("Nenhum arquivo foi carregado ainda.")
+            if st.button(f"Gerar Excel {nome}"):
+
+                nome_excel = f"{nome}_{agora().strftime('%H-%M-%S')}.xlsx"
+
+                df.to_excel(nome_excel, index=False)
+
+                with open(nome_excel, "rb") as f:
+                    st.download_button(
+                        f"📥 Baixar {nome}",
+                        f,
+                        file_name=nome_excel
+                    )
