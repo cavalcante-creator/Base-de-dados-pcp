@@ -241,6 +241,7 @@ if pagina == "📊 Análise PCP":
 
     saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
 
+    # TRATAR PERFIL
     perfil["Quantidade"] = (
         perfil["Quantidade"]
         .astype(str)
@@ -249,19 +250,43 @@ if pagina == "📊 Análise PCP":
         .astype(float)
     )
 
-    demanda = perfil[perfil["Tipo"] == "DC"]\
+    perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True)
+
+    perfil["Referencia"] = (
+        perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
+        + "." +
+        perfil["Data Fim"].dt.year.astype(str)
+    )
+
+    semana_atual = datetime.now().isocalendar()[1]
+    ano_atual = datetime.now().year
+    ref_atual = str(semana_atual).zfill(2) + "." + str(ano_atual)
+
+    # DEMANDAS
+    demanda_dc = perfil[perfil["Tipo"] == "DC"]\
         .groupby("Item")["Quantidade"].sum().reset_index()
+    demanda_dc.columns = ["Codigo", "Demanda Pedido"]
 
-    demanda.columns = ["Codigo", "Demanda Pedido"]
+    demanda_dp = perfil[perfil["Tipo"] == "DP"]\
+        .groupby("Item")["Quantidade"].sum().reset_index()
+    demanda_dp.columns = ["Codigo", "Demanda DP"]
 
+    demanda_dp_semana = perfil[
+        (perfil["Tipo"] == "DP") &
+        (perfil["Referencia"] == ref_atual)
+    ].groupby("Item")["Quantidade"].sum().reset_index()
+    demanda_dp_semana.columns = ["Codigo", "DP Semana Atual"]
+
+    # MERGE
     df = base.merge(saldo_base, on="Codigo", how="left")
-    df = df.merge(demanda, on="Codigo", how="left")
+    df = df.merge(demanda_dc, on="Codigo", how="left")
+    df = df.merge(demanda_dp, on="Codigo", how="left")
+    df = df.merge(demanda_dp_semana, on="Codigo", how="left")
 
     df = df.fillna(0)
 
-    # CALCULOS
+    # STATUS
     df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
-    df["Sugestão Produção"] = (df["Demanda Pedido"] - df["Saldo Almox 3"]).clip(lower=0)
 
     def status(row):
         if row["Saldo vs Demanda"] < 0:
@@ -273,8 +298,7 @@ if pagina == "📊 Análise PCP":
 
     df["Status"] = df.apply(status, axis=1)
 
-    # EMOJI VISUAL
-    def emoji_status(val):
+    def emoji(val):
         if "OK" in val:
             return "🟢 " + val
         elif "RISCO" in val:
@@ -282,11 +306,10 @@ if pagina == "📊 Análise PCP":
         else:
             return "🔴 " + val
 
-    df["Status"] = df["Status"].apply(emoji_status)
+    df["Status"] = df["Status"].apply(emoji)
 
     # CARDS
     col1, col2, col3 = st.columns(3)
-
     col1.metric("FALTA", len(df[df["Status"].str.contains("FALTA")]))
     col2.metric("RISCO", len(df[df["Status"].str.contains("RISCO")]))
     col3.metric("OK", len(df[df["Status"].str.contains("OK")]))
@@ -300,7 +323,8 @@ if pagina == "📊 Análise PCP":
         "Saldo Total",
         "Saldo Almox 3",
         "Demanda Pedido",
-        "Sugestão Produção",
+        "Demanda DP",
+        "DP Semana Atual",
         "Status"
     ]]
 
