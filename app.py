@@ -213,27 +213,7 @@ if pagina == "Upload Previsão Produção":
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# GERAR EXCEL
-# ==========================================================
-if pagina == "Gerar Excel":
-    st.title("📥 Gerar Excel")
-
-    arquivos = {
-        "Saldo": "saldo.csv",
-        "Perfil": "perfil.csv",
-        "Ordens": "ordens.csv",
-        "Previsão": "previsao.csv"
-    }
-
-    for nome, arquivo in arquivos.items():
-        if os.path.exists(arquivo):
-            df = pd.read_csv(arquivo)
-
-            st.subheader(nome)
-            st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# ANALISE PCP (BASE CORRETA)
+# ANALISE PCP
 # ==========================================================
 if pagina == "📊 Análise PCP":
     st.title("📊 Análise PCP")
@@ -246,9 +226,7 @@ if pagina == "📊 Análise PCP":
         st.warning("⚠️ Carregue todos os dados primeiro.")
         st.stop()
 
-    # =========================
     # ULTIMO UPLOAD
-    # =========================
     saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
         .drop_duplicates(subset=["Codigo"])
 
@@ -257,20 +235,12 @@ if pagina == "📊 Análise PCP":
     previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
         .drop_duplicates(subset=["COD"])
 
-    # =========================
-    # BASE PREVISÃO
-    # =========================
+    # BASE
     base = previsao[["COD", "PRODUTO"]].copy()
     base.columns = ["Codigo", "Descricao"]
 
-    # =========================
-    # SALDO
-    # =========================
     saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
 
-    # =========================
-    # DEMANDA DC
-    # =========================
     perfil["Quantidade"] = (
         perfil["Quantidade"]
         .astype(str)
@@ -284,79 +254,54 @@ if pagina == "📊 Análise PCP":
 
     demanda.columns = ["Codigo", "Demanda Pedido"]
 
-    # =========================
-    # MERGE FINAL
-    # =========================
     df = base.merge(saldo_base, on="Codigo", how="left")
     df = df.merge(demanda, on="Codigo", how="left")
 
-    # =========================
-# TRATAMENTO FINAL
-# =========================
-df["Saldo Total"] = df["Saldo Total"].fillna(0)
-df["Saldo Almox 3"] = df["Saldo Almox 3"].fillna(0)
-df["Demanda Pedido"] = df["Demanda Pedido"].fillna(0)
+    df = df.fillna(0)
 
-# =========================
-# CÁLCULOS
-# =========================
+    # CALCULOS
+    df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+    df["Sugestão Produção"] = (df["Demanda Pedido"] - df["Saldo Almox 3"]).clip(lower=0)
 
-# SALDO VS DEMANDA
-df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+    def status(row):
+        if row["Saldo vs Demanda"] < 0:
+            return "⛔ FALTA"
+        elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+            return "⚠️ RISCO"
+        else:
+            return "✅ OK"
 
-# SUGESTÃO PRODUÇÃO
-df["Sugestão Produção"] = df["Demanda Pedido"] - df["Saldo Almox 3"]
-df["Sugestão Produção"] = df["Sugestão Produção"].apply(lambda x: max(x, 0))
+    df["Status"] = df.apply(status, axis=1)
 
-# STATUS (IGUAL POWER BI)
-def definir_status(row):
-    if row["Saldo vs Demanda"] < 0:
-        return "⛔ FALTA"
-    elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
-        return "⚠️ RISCO"
-    else:
-        return "✅ OK"
+    # EMOJI VISUAL
+    def emoji_status(val):
+        if "OK" in val:
+            return "🟢 " + val
+        elif "RISCO" in val:
+            return "🟡 " + val
+        else:
+            return "🔴 " + val
 
-df["Status"] = df.apply(definir_status, axis=1)
+    df["Status"] = df["Status"].apply(emoji_status)
 
-# =========================
-# CORES
-# =========================
-def cor_status(val):
-    if "OK" in val:
-        return "background-color: #c6efce; color: #006100"
-    elif "RISCO" in val:
-        return "background-color: #ffeb9c; color: #9c5700"
-    elif "FALTA" in val:
-        return "background-color: #ffc7ce; color: #9c0006"
+    # CARDS
+    col1, col2, col3 = st.columns(3)
 
-# =========================
-# CARDS
-# =========================
-col1, col2, col3 = st.columns(3)
+    col1.metric("FALTA", len(df[df["Status"].str.contains("FALTA")]))
+    col2.metric("RISCO", len(df[df["Status"].str.contains("RISCO")]))
+    col3.metric("OK", len(df[df["Status"].str.contains("OK")]))
 
-col1.metric("⛔ FALTA", len(df[df["Status"].str.contains("FALTA")]))
-col2.metric("⚠️ RISCO", len(df[df["Status"].str.contains("RISCO")]))
-col3.metric("✅ OK", len(df[df["Status"].str.contains("OK")]))
+    st.divider()
 
-st.divider()
+    # TABELA
+    tabela = df[[
+        "Codigo",
+        "Descricao",
+        "Saldo Total",
+        "Saldo Almox 3",
+        "Demanda Pedido",
+        "Sugestão Produção",
+        "Status"
+    ]]
 
-# =========================
-# TABELA FINAL
-# =========================
-st.subheader("📋 Análise de Estoque")
-
-tabela = df[[
-    "Codigo",
-    "Descricao",
-    "Saldo Total",
-    "Saldo Almox 3",
-    "Demanda Pedido",
-    "Sugestão Produção",
-    "Status"
-]]
-
-st.dataframe(
-    tabela.style.applymap(cor_status, subset=["Status"]),
-    use_container_width=True
-)
+    st.dataframe(tabela, use_container_width=True)
