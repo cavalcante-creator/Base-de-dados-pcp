@@ -199,16 +199,19 @@ with abas[3]:
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# PARÂMETROS (ROBUSTO)
+# PARÂMETROS (ACEITA TUDO)
 # ==========================================================
 with abas[4]:
     st.title("⚙️ Parâmetros")
 
-    file = st.file_uploader("Excel Parâmetros", type=["xlsx"])
+    file = st.file_uploader("Arquivo Parâmetros", type=None)
 
     if file:
         try:
-            df_raw = pd.read_excel(file, header=None)
+            try:
+                df_raw = pd.read_excel(file, header=None)
+            except:
+                df_raw = pd.read_csv(file)
 
             linha_header = None
             for i in range(len(df_raw)):
@@ -217,7 +220,11 @@ with abas[4]:
                     linha_header = i
                     break
 
-            df = pd.read_excel(file, header=linha_header)
+            if linha_header is not None:
+                df = pd.read_excel(file, header=linha_header)
+            else:
+                df = df_raw.copy()
+
             df.columns = df.columns.astype(str).str.upper()
 
             col_cod = None
@@ -228,6 +235,11 @@ with abas[4]:
                     col_cod = c
                 if "SEG" in c or "ESTO" in c:
                     col_seg = c
+
+            if not col_cod or not col_seg:
+                st.error("❌ Colunas não encontradas")
+                st.write(df.columns.tolist())
+                st.stop()
 
             df = df[[col_cod, col_seg]]
             df.columns = ["COD", "ESTQ SEG"]
@@ -243,7 +255,7 @@ with abas[4]:
             st.dataframe(df, use_container_width=True)
 
         except Exception as e:
-            st.error(e)
+            st.error(f"Erro: {e}")
 
 # ==========================================================
 # BASE DE DADOS
@@ -322,7 +334,6 @@ with abas[6]:
 
     df["Status"] = df["Saldo vs Demanda"].apply(status)
 
-    # FILTRO POR CARD
     if "filtro" not in st.session_state:
         st.session_state.filtro = "TODOS"
 
