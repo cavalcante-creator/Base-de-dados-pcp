@@ -199,7 +199,7 @@ with abas[3]:
         st.dataframe(df, use_container_width=True)
 
 # ==========================================================
-# PARÂMETROS (ACEITA TUDO)
+# PARÂMETROS (ROBUSTO + ENCODING)
 # ==========================================================
 with abas[4]:
     st.title("⚙️ Parâmetros")
@@ -211,7 +211,10 @@ with abas[4]:
             try:
                 df_raw = pd.read_excel(file, header=None)
             except:
-                df_raw = pd.read_csv(file)
+                try:
+                    df_raw = pd.read_csv(file, encoding="latin-1")
+                except:
+                    df_raw = pd.read_csv(file, encoding="cp1252")
 
             linha_header = None
             for i in range(len(df_raw)):
@@ -221,7 +224,10 @@ with abas[4]:
                     break
 
             if linha_header is not None:
-                df = pd.read_excel(file, header=linha_header)
+                try:
+                    df = pd.read_excel(file, header=linha_header)
+                except:
+                    df = pd.read_csv(file, encoding="latin-1")
             else:
                 df = df_raw.copy()
 
