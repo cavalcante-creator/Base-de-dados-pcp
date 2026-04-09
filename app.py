@@ -27,6 +27,15 @@ abas = st.tabs([
 ])
 
 # ==========================================================
+# FUNÇÃO SALVAR HISTÓRICO
+# ==========================================================
+def salvar_csv(df, nome_arquivo):
+    if os.path.exists(nome_arquivo):
+        antigo = pd.read_csv(nome_arquivo)
+        df = pd.concat([antigo, df], ignore_index=True)
+    df.to_csv(nome_arquivo, index=False)
+
+# ==========================================================
 # SALDO
 # ==========================================================
 with abas[0]:
@@ -51,10 +60,6 @@ with abas[0]:
             codigo_atual = None
 
             for linha in linhas:
-                linha = linha.strip()
-                if not linha:
-                    continue
-
                 codigo_match = re.search(r'\b([A-Z]{1,3}\d{3,5})\b', linha)
 
                 if codigo_match:
@@ -78,7 +83,7 @@ with abas[0]:
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
             df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-            df.to_csv("saldo.csv", index=False)
+            salvar_csv(df, "saldo.csv")
 
             st.success("Saldo processado!")
             st.dataframe(df, use_container_width=True)
@@ -126,7 +131,7 @@ with abas[1]:
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
             df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-            df.to_csv("perfil.csv", index=False)
+            salvar_csv(df, "perfil.csv")
 
             st.success("Perfil processado!")
             st.dataframe(df, use_container_width=True)
@@ -146,7 +151,7 @@ with abas[2]:
         df["Data Processamento"] = agora().strftime("%d/%m/%Y")
         df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-        df.to_csv("ordens.csv", index=False)
+        salvar_csv(df, "ordens.csv")
 
         st.success("Ordens carregadas!")
         st.dataframe(df, use_container_width=True)
@@ -172,49 +177,10 @@ with abas[3]:
         df["Data Processamento"] = agora().strftime("%d/%m/%Y")
         df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-        df.to_csv("previsao.csv", index=False)
+        salvar_csv(df, "previsao.csv")
 
         st.success("Previsão carregada!")
         st.dataframe(df, use_container_width=True)
-
-# ==========================================================
-# BASE DE DADOS
-# ==========================================================
-with abas[4]:
-    st.title("📋 Base de Dados (Último Upload)")
-
-    arquivos = {
-        "Saldo": ("saldo.csv", "Codigo"),
-        "Perfil": ("perfil.csv", "Item"),
-        "Ordens": ("ordens.csv", None),
-        "Previsão": ("previsao.csv", "COD")
-    }
-
-    for nome, (arquivo, chave) in arquivos.items():
-        st.subheader(nome)
-
-        if os.path.exists(arquivo):
-            df = pd.read_csv(arquivo)
-
-            if "Data Processamento" in df.columns:
-                df = df.sort_values(
-                    by=["Data Processamento", "Hora Processamento"],
-                    ascending=False
-                )
-
-            if chave and chave in df.columns:
-                df = df.drop_duplicates(subset=[chave], keep="first")
-
-            st.dataframe(df, use_container_width=True)
-
-            st.download_button(
-                f"📥 Baixar {nome}",
-                df.to_csv(index=False).encode("utf-8"),
-                file_name=f"{nome}_limpo.csv",
-                mime="text/csv"
-            )
-        else:
-            st.warning(f"{nome} ainda não carregado.")
 
 # ==========================================================
 # ANALISE PCP
@@ -230,58 +196,51 @@ with abas[5]:
         st.warning("⚠️ Faça upload dos dados primeiro.")
         st.stop()
 
-    saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
-        .drop_duplicates(subset=["Codigo"])
+    # FILTRO DE DATA
+    datas = sorted(saldo["Data Processamento"].dropna().unique())
+    data_sel = st.selectbox("📅 Selecione a Data", datas)
 
-    perfil = perfil.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)
+    # FILTRAR ÚLTIMO DO DIA
+    saldo = saldo[saldo["Data Processamento"] == data_sel]\
+        .sort_values(by="Hora Processamento", ascending=False)\
+        .drop_duplicates("Codigo")
 
-    previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False)\
-        .drop_duplicates(subset=["COD"])
+    perfil = perfil[perfil["Data Processamento"] == data_sel]
+    previsao = previsao[previsao["Data Processamento"] == data_sel]\
+        .sort_values(by="Hora Processamento", ascending=False)\
+        .drop_duplicates("COD")
 
+    # BASE
     base = previsao[["COD", "PRODUTO"]].copy()
     base.columns = ["Codigo", "Descricao"]
 
     saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
 
+    # TRATAR PERFIL
     perfil["Quantidade"] = (
-        perfil["Quantidade"]
-        .astype(str)
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
+        perfil["Quantidade"].astype(str)
+        .str.replace(".", "")
+        .str.replace(",", ".")
         .astype(float)
     )
 
     perfil["Data Fim"] = pd.to_datetime(perfil["Data Fim"], dayfirst=True)
 
-    perfil["Referencia"] = (
-        perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
-        + "." +
-        perfil["Data Fim"].dt.year.astype(str)
-    )
-
-    semana = datetime.now().isocalendar()[1]
-    ano = datetime.now().year
-    ref = str(semana).zfill(2) + "." + str(ano)
-
+    # DEMANDA
     dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
     dc.columns = ["Codigo", "Demanda Pedido"]
 
     dp = perfil[perfil["Tipo"] == "DP"].groupby("Item")["Quantidade"].sum().reset_index()
     dp.columns = ["Codigo", "Demanda DP"]
 
-    dp_sem = perfil[
-        (perfil["Tipo"] == "DP") &
-        (perfil["Referencia"] == ref)
-    ].groupby("Item")["Quantidade"].sum().reset_index()
-    dp_sem.columns = ["Codigo", "DP Semana Atual"]
-
+    # MERGE
     df = base.merge(saldo_base, on="Codigo", how="left")
     df = df.merge(dc, on="Codigo", how="left")
     df = df.merge(dp, on="Codigo", how="left")
-    df = df.merge(dp_sem, on="Codigo", how="left")
 
     df = df.fillna(0)
 
+    # STATUS
     df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
     def status(row):
@@ -293,5 +252,14 @@ with abas[5]:
             return "🟢 OK"
 
     df["Status"] = df.apply(status, axis=1)
+
+    # CARDS (POWER BI STYLE)
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("🔴 FALTA", len(df[df["Status"].str.contains("FALTA")]))
+    col2.metric("🟡 RISCO", len(df[df["Status"].str.contains("RISCO")]))
+    col3.metric("🟢 OK", len(df[df["Status"].str.contains("OK")]))
+
+    st.divider()
 
     st.dataframe(df, use_container_width=True)
