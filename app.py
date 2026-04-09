@@ -303,8 +303,15 @@ if pagina == "Upload Parâmetros":
             elif nome_arquivo.endswith(".xls"):
 
                 file.seek(0)
-                df_raw = pd.read_excel(file, header=None, engine="xlrd")
-                tipo_arquivo = "xls"
+
+                try:
+                    df_raw = pd.read_excel(file, header=None, engine="xlrd")
+                    tipo_arquivo = "xls"
+
+                except:
+                    file.seek(0)
+                    df_raw = pd.read_html(file)[0]
+                    tipo_arquivo = "html_xls"
 
             else:
                 st.error("Formato de arquivo não suportado.")
@@ -356,6 +363,14 @@ if pagina == "Upload Parâmetros":
                         header=linha_header,
                         engine="xlrd"
                     )
+
+                elif tipo_arquivo == "html_xls":
+
+                    file.seek(0)
+                    df = pd.read_html(file)[0]
+
+                    df.columns = df.iloc[linha_header]
+                    df = df[(linha_header + 1):]
 
                 df.columns = df.columns.astype(str).str.upper().str.strip()
 
@@ -450,12 +465,7 @@ if pagina == "Gerar Excel":
             st.subheader(nome)
             st.dataframe(df, use_container_width=True)
 
-            nome_excel = f"{nome}_{agora().strftime('%H-%M-%S')}.xlsx"
-
-            df_excel = df.copy()
-
-            output = StringIO()
-            csv_export = df_excel.to_csv(index=False)
+            csv_export = df.to_csv(index=False)
 
             st.download_button(
                 label=f"📥 Baixar CSV {nome}",
