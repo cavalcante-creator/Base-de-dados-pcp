@@ -3,12 +3,74 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
+st.set_page_config(page_title="Dashboard PCP", layout="wide")
+
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    h1, h2, h3 {
+        color: #12344d;
+        font-weight: 700;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 14px;
+        border: 1px solid #d7e3ee;
+    }
+
+    div.stButton > button {
+        background: linear-gradient(90deg, #0f766e, #0ea5a4);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+    }
+
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #0b5f59, #0b8f8d);
+        color: white;
+    }
+
+    div[data-testid="stDownloadButton"] > button {
+        background: white;
+        color: #12344d;
+        border: 1px solid #c9d9e6;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    div[data-testid="stFileUploader"] {
+        background: white;
+        border: 1px dashed #aac4d6;
+        border-radius: 16px;
+        padding: 10px;
+    }
+
+    div[data-testid="stDataFrame"] {
+        background: white;
+        border-radius: 16px;
+        padding: 8px;
+        border: 1px solid #dbe7f0;
+        box-shadow: 0 4px 14px rgba(18, 52, 77, 0.05);
+    }
+</style>
+""", unsafe_allow_html=True)
+
 fuso = pytz.timezone("America/Sao_Paulo")
 
 def agora():
     return datetime.now(fuso)
 
-st.set_page_config(page_title="Dashboard PCP", layout="wide")
+st.title("Dashboard PCP")
 
 if "previsao_df" not in st.session_state:
     st.session_state["previsao_df"] = pd.DataFrame()
@@ -23,61 +85,9 @@ previsao = st.session_state["previsao_df"]
 saldo = st.session_state["saldo_df"]
 perfil = st.session_state["perfil_df"]
 
-st.title("Dashboard PCP")
-
-st.info("O dashboard sempre utiliza automaticamente apenas o processamento mais recente de cada item.")
-
-if previsao.empty:
-    st.error("Nenhuma previsão encontrada. Faça o upload e processamento da previsão.")
+if previsao.empty or saldo.empty or perfil.empty:
+    st.warning("Faça o processamento dos arquivos antes de acessar o dashboard.")
     st.stop()
-
-if saldo.empty:
-    st.error("Nenhum saldo encontrado. Faça o upload e processamento do saldo.")
-    st.stop()
-
-if perfil.empty:
-    st.error("Nenhum perfil encontrado. Faça o upload e processamento do perfil.")
-    st.stop()
-
-# Mantém apenas a previsão mais recente por código
-if "Data Processamento" in previsao.columns:
-    previsao["Data Processamento"] = pd.to_datetime(
-        previsao["Data Processamento"],
-        errors="coerce"
-    )
-
-    previsao = (
-        previsao
-        .sort_values("Data Processamento", ascending=False)
-        .drop_duplicates(subset=["COD"], keep="first")
-    )
-
-# Mantém apenas o saldo mais recente por código
-if "Data Relatório" in saldo.columns:
-    saldo["Data Relatório"] = pd.to_datetime(
-        saldo["Data Relatório"],
-        dayfirst=True,
-        errors="coerce"
-    )
-
-    saldo = (
-        saldo
-        .sort_values("Data Relatório", ascending=False)
-        .drop_duplicates(subset=["Codigo"], keep="first")
-    )
-
-# Mantém apenas o perfil mais recente por item
-if "Data Processamento" in perfil.columns:
-    perfil["Data Processamento"] = pd.to_datetime(
-        perfil["Data Processamento"],
-        errors="coerce"
-    )
-
-    perfil = (
-        perfil
-        .sort_values("Data Processamento", ascending=False)
-        .drop_duplicates(subset=["Item"], keep="first")
-    )
 
 base = previsao[["COD", "PRODUTO"]].copy()
 base.columns = ["Codigo", "Descricao"]
@@ -167,32 +177,21 @@ def definir_status(row):
 
 df["Status"] = df.apply(definir_status, axis=1)
 
-if "filtro_status_dashboard" not in st.session_state:
-    st.session_state["filtro_status_dashboard"] = "TODOS"
-
 st.subheader("Resumo Geral")
 
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    if st.button(f"Todos\n{len(df)}"):
-        st.session_state["filtro_status_dashboard"] = "TODOS"
+    st.metric("Total de Itens", len(df))
 
 with col2:
-    if st.button(f"Falta\n{int((df['Status'] == 'FALTA').sum())}"):
-        st.session_state["filtro_status_dashboard"] = "FALTA"
+    st.metric("Itens em Falta", int((df['Status'] == 'FALTA').sum()))
 
 with col3:
-    if st.button(f"Risco\n{int((df['Status'] == 'RISCO').sum())}"):
-        st.session_state["filtro_status_dashboard"] = "RISCO"
+    st.metric("Itens em Risco", int((df['Status'] == 'RISCO').sum()))
 
 with col4:
-    if st.button(f"OK\n{int((df['Status'] == 'OK').sum())}"):
-        st.session_state["filtro_status_dashboard"] = "OK"
-
-status_ativo = st.session_state["filtro_status_dashboard"]
-
-st.markdown(f"### Filtro Atual: {status_ativo}")
+    st.metric("Itens OK", int((df['Status'] == 'OK').sum()))
 
 col_busca1, col_busca2 = st.columns([2, 1])
 
@@ -212,9 +211,6 @@ with col_busca2:
     )
 
 df_filtrado = df.copy()
-
-if status_ativo != "TODOS":
-    df_filtrado = df_filtrado[df_filtrado["Status"] == status_ativo]
 
 if busca:
     busca = busca.lower()
@@ -248,8 +244,6 @@ def colorir_saldo(valor):
     else:
         return "background-color: #d1e7dd; color: #0f5132;"
 
-st.subheader("Tabela de Análise")
-
 styled_df = df_filtrado.style.map(
     colorir_status,
     subset=["Status"]
@@ -257,6 +251,8 @@ styled_df = df_filtrado.style.map(
     colorir_saldo,
     subset=["Saldo Total", "Saldo Almox 3", "Saldo vs Demanda"]
 )
+
+st.subheader("Tabela de Análise")
 
 st.dataframe(
     styled_df,
