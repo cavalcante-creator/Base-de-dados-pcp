@@ -34,12 +34,10 @@ def exportar_excel_formatado(df, nome_aba="Dados"):
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        if ws.max_row >= 2 and ws.max_column >= 1:
+        if ws.max_row >= 2:
             ultima_coluna = get_column_letter(ws.max_column)
-            nome_tabela = re.sub(r"\W+", "", nome_aba) or "Dados"
-
             tabela = Table(
-                displayName=f"Tabela{nome_tabela[:20]}",
+                displayName="TabelaDados",
                 ref=f"A1:{ultima_coluna}{ws.max_row}"
             )
 
@@ -70,16 +68,54 @@ def botao_downloads(df):
             "dashboard_pcp.xlsx"
         )
 
+# ========================= FUNÇÃO GENÉRICA =========================
+def achar_coluna(df, possiveis):
+    for col in possiveis:
+        if col in df.columns:
+            return col
+    return None
+
 # ========================= DADOS =========================
 try:
     saldo = pd.read_csv("saldo.csv")
     perfil = pd.read_csv("perfil.csv")
     previsao = pd.read_csv("previsao.csv")
-    ordens = pd.read_csv("ordens.csv")  # 🔥 NOVO (SEM IMPACTAR NADA)
+    ordens = pd.read_csv("ordens.csv")
 except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
+# ========================= IDENTIFICAR COLUNAS =========================
+col_item_perfil = achar_coluna(perfil, ["Cd. Item","Item","Codigo","Cod Item"])
+col_item_ordens = achar_coluna(ordens, ["Cd. Item","Item","Codigo","Cod Item"])
+
+col_qtd_perfil = achar_coluna(perfil, ["Quantidade","Qtde","Qtd"])
+col_qtd_ordens = achar_coluna(ordens, ["Quantidade","Qtde","Qtd"])
+
+if not col_item_perfil or not col_qtd_perfil:
+    st.error(f"Erro no perfil.csv → {list(perfil.columns)}")
+    st.stop()
+
+if not col_item_ordens or not col_qtd_ordens:
+    st.error(f"Erro no ordens.csv → {list(ordens.columns)}")
+    st.stop()
+
+# ========================= TRATAR QUANTIDADE =========================
+perfil[col_qtd_perfil] = (
+    perfil[col_qtd_perfil].astype(str)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
+    .astype(float)
+)
+
+ordens[col_qtd_ordens] = (
+    ordens[col_qtd_ordens].astype(str)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
+    .astype(float)
+)
+
+# ========================= BASES =========================
 saldo = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
 previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("COD")
 
@@ -88,26 +124,26 @@ base.columns = ["Codigo","Descricao"]
 
 saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
 
-perfil["Quantidade"] = (
-    perfil["Quantidade"].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-    .astype(float)
-)
-
-# ========================= DEMANDA ORIGINAL (NÃO MEXER) =========================
+# ========================= DEMANDA =========================
 dc = perfil[perfil["Tipo"]=="DC"] \
-    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
+    .groupby(col_item_perfil)[col_qtd_perfil].sum().reset_index()
 
 dc.columns = ["Codigo","Demanda Pedido"]
 
-# ========================= BASE PRINCIPAL =========================
+# ========================= ORDENS (OFA) =========================
+op = ordens[ordens["Tipo"]=="OFA"] \
+    .groupby(col_item_ordens)[col_qtd_ordens].sum().reset_index()
+
+op.columns = ["Codigo","Qtde Pendente OP"]
+
+# ========================= MERGE =========================
 df = base.merge(saldo_base,on="Codigo",how="left")
 df = df.merge(dc,on="Codigo",how="left")
+df = df.merge(op,on="Codigo",how="left")
 
 df = df.fillna(0)
 
-# 🔴 NÃO MEXER (SUA LÓGICA ORIGINAL)
+# ========================= LÓGICA ORIGINAL =========================
 df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
 def status(row):
@@ -119,23 +155,7 @@ def status(row):
 
 df["Status"] = df.apply(status, axis=1)
 
-# ========================= 🔥 NOVO BLOCO (ORDENS - NÃO INTERFERE) =========================
-ordens["Quantidade"] = (
-    ordens["Quantidade"].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-    .astype(float)
-)
-
-op = ordens[ordens["Tipo"] == "OFA"] \
-    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
-
-op.columns = ["Codigo","Qtde Pendente OP"]
-
-df = df.merge(op, on="Codigo", how="left")
-df["Qtde Pendente OP"] = df["Qtde Pendente OP"].fillna(0)
-
-# 🔥 NOVA COLUNA (APENAS ANALÍTICA)
+# ========================= NOVO (SEM INTERFERIR) =========================
 df["Saldo Real"] = (
     df["Saldo Almox 3"]
     - df["Demanda Pedido"]
@@ -146,7 +166,7 @@ df["Saldo Real"] = (
 if "filtro" not in st.session_state:
     st.session_state.filtro = "TODOS"
 
-c1, c2, c3, c4 = st.columns(4)
+c1,c2,c3,c4 = st.columns(4)
 
 if c1.button(f"TOTAL\n{len(df)}"):
     st.session_state.filtro = "TODOS"
@@ -167,7 +187,7 @@ else:
     df_filtrado = df[df["Status"] == st.session_state.filtro]
 
 # ========================= BUSCA =========================
-busca = st.text_input("Buscar por código ou descrição")
+busca = st.text_input("Buscar")
 
 if busca:
     df_filtrado = df_filtrado[
@@ -177,15 +197,14 @@ if busca:
 
 # ========================= COR NA LINHA =========================
 def cor(row):
-    if row["Status"] == "FALTA":
-        return ["background-color:#fecaca"] * len(row)
-    elif row["Status"] == "RISCO":
-        return ["background-color:#fde68a"] * len(row)
-    elif row["Status"] == "OK":
-        return ["background-color:#bbf7d0"] * len(row)
-    return [""] * len(row)
+    if row["Status"]=="FALTA":
+        return ["background-color:#fecaca"]*len(row)
+    if row["Status"]=="RISCO":
+        return ["background-color:#fde68a"]*len(row)
+    if row["Status"]=="OK":
+        return ["background-color:#bbf7d0"]*len(row)
+    return [""]*len(row)
 
-# ========================= TABELA =========================
 st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= DOWNLOAD =========================
