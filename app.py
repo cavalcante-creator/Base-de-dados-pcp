@@ -100,235 +100,267 @@ def botao_downloads(df, nome_base, nome_aba):
         )
 
 
-abas = st.tabs([
-    "Saldo",
-    "Perfil",
-    "Ordens",
-    "Previsão",
-    "Base de Dados",
-    "Análise PCP"
-])
+def ir_para(pagina):
+    st.query_params["pagina"] = pagina
+    st.rerun()
 
 
-with abas[0]:
-    st.title("Saldo Produção")
-
-    file = st.file_uploader("PDF Saldo", type=["pdf"])
-
-    if file:
-        with open("saldo_temp.pdf", "wb") as f:
-            f.write(file.read())
-
-        if st.button("Processar Saldo"):
-            linhas = []
-
-            with pdfplumber.open("saldo_temp.pdf") as pdf:
-                for p in pdf.pages:
-                    texto = p.extract_text()
-                    if texto:
-                        linhas.extend(texto.split("\n"))
-
-            dados = {}
-            codigo_atual = None
-
-            for linha in linhas:
-                linha = linha.strip()
-                if not linha:
-                    continue
-
-                if "ALMOXARIFADO" in linha.upper():
-                    codigo_match = None
-                else:
-                    codigo_match = re.search(r"\b([A-Z]{1,3}\d{3,5})\b", linha)
-
-                if codigo_match:
-                    codigo_atual = codigo_match.group(1)
-                    if codigo_atual not in dados:
-                        dados[codigo_atual] = {
-                            "Codigo": codigo_atual,
-                            "Saldo Total": 0,
-                            "Saldo Almox 3": 0
-                        }
-                    continue
-
-                if "ALMOXARIFADO" in linha.upper() and codigo_atual:
-                    nums = re.findall(r"[\d\.]+\,\d+", linha)
-                    if nums:
-                        valor = float(nums[-1].replace(".", "").replace(",", "."))
-                        dados[codigo_atual]["Saldo Total"] += valor
-
-                        if re.search(r"ALMOXARIFADO\s*:\s*3\b", linha.upper()):
-                            dados[codigo_atual]["Saldo Almox 3"] += valor
-
-            df = pd.DataFrame(dados.values())
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
-
-            df.to_csv("saldo.csv", index=False)
-
-            st.success("Saldo processado!")
-            st.dataframe(df, use_container_width=True)
+def pagina_atual():
+    pagina = st.query_params.get("pagina", "principal")
+    if isinstance(pagina, list):
+        return pagina[0]
+    return pagina
 
 
-with abas[1]:
-    st.title("Perfil Produção")
+def menu_lateral():
+    st.sidebar.title("Navegação")
 
-    file = st.file_uploader("PDF Perfil", type=["pdf"])
+    if st.sidebar.button("Página Principal", use_container_width=True):
+        ir_para("principal")
 
-    if file:
-        with open("perfil_temp.pdf", "wb") as f:
-            f.write(file.read())
+    if st.sidebar.button("Dashboard PCP", use_container_width=True):
+        ir_para("dashboard")
 
-        if st.button("Processar Perfil"):
-            movimentacoes = []
-            codigo_item = ""
-
-            regex = re.compile(
-                r"(DD|DC|DP).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+)"
-            )
-
-            with pdfplumber.open("perfil_temp.pdf") as pdf:
-                for p in pdf.pages:
-                    texto = p.extract_text()
-                    if texto:
-                        for linha in texto.split("\n"):
-                            item_match = re.search(r"Item:\s*(\S+)", linha)
-                            if item_match:
-                                codigo_item = item_match.group(1)
-
-                            mov = regex.search(linha)
-                            if mov:
-                                movimentacoes.append({
-                                    "Item": codigo_item,
-                                    "Tipo": mov.group(1),
-                                    "Data Fim": mov.group(2),
-                                    "Quantidade": mov.group(3)
-                                })
-
-            df = pd.DataFrame(movimentacoes)
-            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
-
-            df.to_csv("perfil.csv", index=False)
-
-            st.success("Perfil processado!")
-            st.dataframe(df, use_container_width=True)
+    st.sidebar.markdown("---")
+    st.sidebar.write("Endereços:")
+    st.sidebar.code("?pagina=principal")
+    st.sidebar.code("?pagina=dashboard")
 
 
-with abas[2]:
-    st.title("Ordens")
+def render_principal():
+    st.title("PCP Produção")
+    st.caption("Página principal do sistema")
 
-    file = st.file_uploader("CSV Ordens", type=["csv"])
+    abas = st.tabs([
+        "Saldo",
+        "Perfil",
+        "Ordens",
+        "Previsão",
+        "Base de Dados"
+    ])
 
-    if file:
-        conteudo = file.read().decode("utf-8", errors="ignore")
-        df = pd.read_csv(StringIO(conteudo), sep=None, engine="python")
+    with abas[0]:
+        st.title("Saldo Produção")
 
-        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+        file = st.file_uploader("PDF Saldo", type=["pdf"])
 
-        df.to_csv("ordens.csv", index=False)
+        if file:
+            with open("saldo_temp.pdf", "wb") as f:
+                f.write(file.read())
 
-        st.success("Ordens carregadas!")
-        st.dataframe(df, use_container_width=True)
+            if st.button("Processar Saldo"):
+                linhas = []
 
+                with pdfplumber.open("saldo_temp.pdf") as pdf:
+                    for p in pdf.pages:
+                        texto = p.extract_text()
+                        if texto:
+                            linhas.extend(texto.split("\n"))
 
-with abas[3]:
-    st.title("Previsão")
+                dados = {}
+                codigo_atual = None
 
-    file = st.file_uploader("Excel Previsão", type=["xlsx"])
+                for linha in linhas:
+                    linha = linha.strip()
+                    if not linha:
+                        continue
 
-    if file:
-        df_raw = pd.read_excel(file, header=None)
+                    if "ALMOXARIFADO" in linha.upper():
+                        codigo_match = None
+                    else:
+                        codigo_match = re.search(r"\b([A-Z]{1,3}\d{3,5})\b", linha)
 
-        linha_header = None
-        for i in range(len(df_raw)):
-            if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
-                linha_header = i
-                break
+                    if codigo_match:
+                        codigo_atual = codigo_match.group(1)
+                        if codigo_atual not in dados:
+                            dados[codigo_atual] = {
+                                "Codigo": codigo_atual,
+                                "Saldo Total": 0,
+                                "Saldo Almox 3": 0
+                            }
+                        continue
 
-        if linha_header is None:
-            st.error("Não foi possível localizar a linha de cabeçalho.")
-            st.stop()
+                    if "ALMOXARIFADO" in linha.upper() and codigo_atual:
+                        nums = re.findall(r"[\d\.]+\,\d+", linha)
+                        if nums:
+                            valor = float(nums[-1].replace(".", "").replace(",", "."))
+                            dados[codigo_atual]["Saldo Total"] += valor
 
-        df = pd.read_excel(file, header=linha_header)
-        df.columns = df.columns.astype(str).str.upper().str.strip()
+                            if re.search(r"ALMOXARIFADO\s*:\s*3\b", linha.upper()):
+                                dados[codigo_atual]["Saldo Almox 3"] += valor
 
-        col_cod = [c for c in df.columns if "COD" in c][0]
-        col_prod = [c for c in df.columns if "PROD" in c][0]
+                df = pd.DataFrame(dados.values())
+                df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+                df["Hora Processamento"] = agora().strftime("%H:%M:%S")
 
-        df = df[[col_cod, col_prod]]
-        df.columns = ["COD", "PRODUTO"]
+                df.to_csv("saldo.csv", index=False)
 
-        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
-        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+                st.success("Saldo processado!")
+                st.dataframe(df, use_container_width=True)
 
-        df.to_csv("previsao.csv", index=False)
+    with abas[1]:
+        st.title("Perfil Produção")
 
-        st.success("Previsão carregada!")
-        st.dataframe(df, use_container_width=True)
+        file = st.file_uploader("PDF Perfil", type=["pdf"])
 
+        if file:
+            with open("perfil_temp.pdf", "wb") as f:
+                f.write(file.read())
 
-with abas[4]:
-    st.title("Base de Dados (Último Upload)")
+            if st.button("Processar Perfil"):
+                movimentacoes = []
+                codigo_item = ""
 
-    if st.button("Limpar Base de Dados"):
-        arquivos_para_remover = [
-            "saldo.csv",
-            "perfil.csv",
-            "ordens.csv",
-            "previsao.csv"
-        ]
-
-        removidos = []
-
-        for arq in arquivos_para_remover:
-            if os.path.exists(arq):
-                os.remove(arq)
-                removidos.append(arq)
-
-        if removidos:
-            st.success(f"Arquivos removidos: {', '.join(removidos)}")
-        else:
-            st.warning("Nenhum arquivo encontrado para remover.")
-
-    arquivos = {
-        "Saldo": ("saldo.csv", "Codigo"),
-        "Perfil": ("perfil.csv", "Item"),
-        "Ordens": ("ordens.csv", None),
-        "Previsão": ("previsao.csv", "COD")
-    }
-
-    for nome, (arquivo, chave) in arquivos.items():
-        st.subheader(nome)
-
-        if os.path.exists(arquivo):
-            df = pd.read_csv(arquivo)
-
-            if "Data Processamento" in df.columns:
-                df = df.sort_values(
-                    by=["Data Processamento", "Hora Processamento"],
-                    ascending=False
+                regex = re.compile(
+                    r"(DD|DC|DP).*?(\d{2}/\d{2}/\d{4}).*?(-?[\d,.]+)"
                 )
 
-            if chave and chave in df.columns:
-                df = df.drop_duplicates(subset=[chave], keep="first")
+                with pdfplumber.open("perfil_temp.pdf") as pdf:
+                    for p in pdf.pages:
+                        texto = p.extract_text()
+                        if texto:
+                            for linha in texto.split("\n"):
+                                item_match = re.search(r"Item:\s*(\S+)", linha)
+                                if item_match:
+                                    codigo_item = item_match.group(1)
 
+                                mov = regex.search(linha)
+                                if mov:
+                                    movimentacoes.append({
+                                        "Item": codigo_item,
+                                        "Tipo": mov.group(1),
+                                        "Data Fim": mov.group(2),
+                                        "Quantidade": mov.group(3)
+                                    })
+
+                df = pd.DataFrame(movimentacoes)
+                df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+                df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+                df.to_csv("perfil.csv", index=False)
+
+                st.success("Perfil processado!")
+                st.dataframe(df, use_container_width=True)
+
+    with abas[2]:
+        st.title("Ordens")
+
+        file = st.file_uploader("CSV Ordens", type=["csv"])
+
+        if file:
+            conteudo = file.read().decode("utf-8", errors="ignore")
+            df = pd.read_csv(StringIO(conteudo), sep=None, engine="python")
+
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+            df.to_csv("ordens.csv", index=False)
+
+            st.success("Ordens carregadas!")
             st.dataframe(df, use_container_width=True)
-            botao_downloads(df, f"{nome}_limpo", nome)
-        else:
-            st.warning(f"{nome} ainda não carregado.")
+
+    with abas[3]:
+        st.title("Previsão")
+
+        file = st.file_uploader("Excel Previsão", type=["xlsx"])
+
+        if file:
+            df_raw = pd.read_excel(file, header=None)
+
+            linha_header = None
+            for i in range(len(df_raw)):
+                if "COD" in df_raw.iloc[i].astype(str).str.upper().values:
+                    linha_header = i
+                    break
+
+            if linha_header is None:
+                st.error("Não foi possível localizar a linha de cabeçalho.")
+                st.stop()
+
+            df = pd.read_excel(file, header=linha_header)
+            df.columns = df.columns.astype(str).str.upper().str.strip()
+
+            col_cod = [c for c in df.columns if "COD" in c][0]
+            col_prod = [c for c in df.columns if "PROD" in c][0]
+
+            df = df[[col_cod, col_prod]]
+            df.columns = ["COD", "PRODUTO"]
+
+            df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+            df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+            df.to_csv("previsao.csv", index=False)
+
+            st.success("Previsão carregada!")
+            st.dataframe(df, use_container_width=True)
+
+    with abas[4]:
+        st.title("Base de Dados (Último Upload)")
+
+        if st.button("Limpar Base de Dados"):
+            arquivos_para_remover = [
+                "saldo.csv",
+                "perfil.csv",
+                "ordens.csv",
+                "previsao.csv"
+            ]
+
+            removidos = []
+
+            for arq in arquivos_para_remover:
+                if os.path.exists(arq):
+                    os.remove(arq)
+                    removidos.append(arq)
+
+            if removidos:
+                st.success(f"Arquivos removidos: {', '.join(removidos)}")
+            else:
+                st.warning("Nenhum arquivo encontrado para remover.")
+
+        arquivos = {
+            "Saldo": ("saldo.csv", "Codigo"),
+            "Perfil": ("perfil.csv", "Item"),
+            "Ordens": ("ordens.csv", None),
+            "Previsão": ("previsao.csv", "COD")
+        }
+
+        for nome, (arquivo, chave) in arquivos.items():
+            st.subheader(nome)
+
+            if os.path.exists(arquivo):
+                df = pd.read_csv(arquivo)
+
+                if "Data Processamento" in df.columns:
+                    df = df.sort_values(
+                        by=["Data Processamento", "Hora Processamento"],
+                        ascending=False
+                    )
+
+                if chave and chave in df.columns:
+                    df = df.drop_duplicates(subset=[chave], keep="first")
+
+                st.dataframe(df, use_container_width=True)
+                botao_downloads(df, f"{nome}_limpo", nome)
+            else:
+                st.warning(f"{nome} ainda não carregado.")
+
+    st.markdown("---")
+    if st.button("Ir para Dashboard PCP", use_container_width=True):
+        ir_para("dashboard")
 
 
-with abas[5]:
-    st.title("Análise PCP")
+def render_dashboard():
+    st.title("Dashboard PCP")
+    st.caption("Página com endereço próprio")
 
     try:
         saldo = pd.read_csv("saldo.csv")
         perfil = pd.read_csv("perfil.csv")
         previsao = pd.read_csv("previsao.csv")
     except Exception:
-        st.warning("Faça upload dos dados primeiro.")
+        st.warning("Faça upload dos dados primeiro na página principal.")
+        if st.button("Voltar para Página Principal", use_container_width=True):
+            ir_para("principal")
         st.stop()
 
     saldo = saldo.sort_values(
@@ -367,8 +399,8 @@ with abas[5]:
         + perfil["Data Fim"].dt.year.astype(str)
     )
 
-    semana = datetime.now().isocalendar()[1]
-    ano = datetime.now().year
+    semana = agora().isocalendar()[1]
+    ano = agora().year
     ref = str(semana).zfill(2) + "." + str(ano)
 
     dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
@@ -400,6 +432,14 @@ with abas[5]:
 
     df["Status"] = df.apply(status, axis=1)
 
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total de Itens", len(df))
+    col2.metric("Itens em Falta", int((df["Status"] == "FALTA").sum()))
+    col3.metric("Itens em Risco", int((df["Status"] == "RISCO").sum()))
+    col4.metric("Itens OK", int((df["Status"] == "OK").sum()))
+
+    st.markdown("---")
+
     opcoes_status = ["FALTA", "RISCO", "OK"]
     opcoes_disponiveis = [item for item in opcoes_status if item in df["Status"].unique()]
 
@@ -409,10 +449,33 @@ with abas[5]:
         default=opcoes_disponiveis
     )
 
+    texto_busca = st.text_input("Buscar por código ou descrição")
+
     if status_selecionado:
         df_filtrado = df[df["Status"].isin(status_selecionado)].copy()
     else:
         df_filtrado = df.iloc[0:0].copy()
 
+    if texto_busca:
+        filtro = texto_busca.strip().lower()
+        df_filtrado = df_filtrado[
+            df_filtrado["Codigo"].astype(str).str.lower().str.contains(filtro, na=False) |
+            df_filtrado["Descricao"].astype(str).str.lower().str.contains(filtro, na=False)
+        ]
+
+    st.bar_chart(df["Status"].value_counts())
+
     st.dataframe(df_filtrado, use_container_width=True)
     botao_downloads(df_filtrado, "analise_pcp_filtrada", "Analise_PCP")
+
+    st.markdown("---")
+    if st.button("Voltar para Página Principal", use_container_width=True):
+        ir_para("principal")
+
+
+menu_lateral()
+
+if pagina_atual() == "dashboard":
+    render_dashboard()
+else:
+    render_principal()
