@@ -13,6 +13,87 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 st.set_page_config(page_title="PCP Produção", layout="wide")
 
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    h1, h2, h3 {
+        color: #12344d;
+        font-weight: 700;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 14px;
+        border: 1px solid #d7e3ee;
+    }
+
+    div.stButton > button {
+        background: linear-gradient(90deg, #0f766e, #0ea5a4);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+    }
+
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #0b5f59, #0b8f8d);
+        color: white;
+    }
+
+    div[data-testid="stDownloadButton"] > button {
+        background: white;
+        color: #12344d;
+        border: 1px solid #c9d9e6;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    div[data-testid="stFileUploader"] {
+        background: white;
+        border: 1px dashed #aac4d6;
+        border-radius: 16px;
+        padding: 10px;
+    }
+
+    div[data-testid="stDataFrame"] {
+        background: white;
+        border-radius: 16px;
+        padding: 8px;
+        border: 1px solid #dbe7f0;
+        box-shadow: 0 4px 14px rgba(18, 52, 77, 0.05);
+    }
+
+    .custom-card {
+        background: white;
+        padding: 20px;
+        border-radius: 18px;
+        border: 1px solid #dbe7f0;
+        box-shadow: 0 6px 20px rgba(18, 52, 77, 0.08);
+        margin-bottom: 16px;
+    }
+
+    .small-title {
+        font-size: 14px;
+        color: #5b7488;
+        margin-bottom: 6px;
+    }
+
+    .big-number {
+        font-size: 32px;
+        font-weight: 700;
+        color: #12344d;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 fuso = pytz.timezone("America/Sao_Paulo")
 
 
@@ -100,7 +181,16 @@ def botao_downloads(df, nome_base, nome_aba):
         )
 
 
-st.title("PCP Produção")
+st.markdown("""
+<div class="custom-card">
+    <div class="small-title">Sistema PCP</div>
+    <div class="big-number">PCP Produção</div>
+    <div style="color:#5b7488; margin-top:8px;">
+        Faça os uploads, processe os arquivos e acompanhe a base consolidada.
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 st.info("No menu lateral do Streamlit haverá uma página separada chamada Dashboard PCP.")
 
 abas = st.tabs([
@@ -167,7 +257,7 @@ with abas[0]:
 
             df.to_csv("saldo.csv", index=False)
 
-            st.success("Saldo processado!")
+            st.success("Saldo processado com sucesso.")
             st.dataframe(df, use_container_width=True)
 
 with abas[1]:
@@ -211,7 +301,7 @@ with abas[1]:
 
             df.to_csv("perfil.csv", index=False)
 
-            st.success("Perfil processado!")
+            st.success("Perfil processado com sucesso.")
             st.dataframe(df, use_container_width=True)
 
 with abas[2]:
@@ -228,7 +318,7 @@ with abas[2]:
 
         df.to_csv("ordens.csv", index=False)
 
-        st.success("Ordens carregadas!")
+        st.success("Ordens carregadas com sucesso.")
         st.dataframe(df, use_container_width=True)
 
 with abas[3]:
@@ -263,7 +353,7 @@ with abas[3]:
 
         df.to_csv("previsao.csv", index=False)
 
-        st.success("Previsão carregada!")
+        st.success("Previsão carregada com sucesso.")
         st.dataframe(df, use_container_width=True)
 
 with abas[4]:
