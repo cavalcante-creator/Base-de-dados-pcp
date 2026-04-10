@@ -14,30 +14,24 @@ st.set_page_config(page_title="Dashboard PCP", layout="wide")
 # ========================= CSS =========================
 st.markdown("""
 <style>
-.main {
-    background: linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
-}
-
 .card {
-    border-radius: 16px;
-    padding: 18px;
+    border-radius: 14px;
+    padding: 14px;
     text-align: center;
     color: white;
     font-weight: 600;
-    transition: 0.2s;
 }
 
-.card:hover {
-    transform: scale(1.04);
-}
+.total {background:#1d4ed8;}
+.falta {background:#dc2626;}
+.risco {background:#f59e0b;}
+.ok {background:#16a34a;}
 
-.total { background: #1d4ed8; }
-.falta { background: #dc2626; }
-.risco { background: #f59e0b; }
-.ok { background: #16a34a; }
-
-.selected {
-    border: 3px solid black;
+button[kind="secondary"] {
+    width: 100%;
+    border-radius: 14px;
+    height: 80px;
+    font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -48,56 +42,12 @@ fuso = pytz.timezone("America/Sao_Paulo")
 def agora():
     return datetime.now(fuso)
 
-def exportar_excel_formatado(df, nome_aba="Dados"):
+def exportar_excel_formatado(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=nome_aba)
-        ws = writer.book[nome_aba]
-
-        ws.freeze_panes = "A2"
-
-        header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
-        header_font = Font(color="FFFFFF", bold=True)
-
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        if ws.max_row >= 2:
-            ultima_coluna = get_column_letter(ws.max_column)
-            tabela = Table(
-                displayName="TabelaDados",
-                ref=f"A1:{ultima_coluna}{ws.max_row}"
-            )
-            tabela.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium9",
-                showRowStripes=True
-            )
-            ws.add_table(tabela)
-
+        df.to_excel(writer, index=False, sheet_name="Dados")
     output.seek(0)
     return output.getvalue()
-
-def botao_downloads(df):
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.download_button(
-            "Baixar CSV",
-            df.to_csv(index=False).encode("utf-8"),
-            "dashboard.csv"
-        )
-
-    with col2:
-        st.download_button(
-            "Baixar Excel",
-            exportar_excel_formatado(df),
-            "dashboard.xlsx"
-        )
-
-# ========================= HEADER =========================
-st.markdown("<h2>Dashboard PCP</h2>", unsafe_allow_html=True)
 
 # ========================= DADOS =========================
 try:
@@ -108,35 +58,39 @@ except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
-saldo = saldo.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False).drop_duplicates("Codigo")
-previsao = previsao.sort_values(by=["Data Processamento", "Hora Processamento"], ascending=False).drop_duplicates("COD")
+saldo = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
+previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("COD")
 
-base = previsao[["COD", "PRODUTO"]].copy()
-base.columns = ["Codigo", "Descricao"]
+base = previsao[["COD","PRODUTO"]].copy()
+base.columns = ["Codigo","Descricao"]
 
-saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]]
+saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
+    .str.replace(".","",regex=False)
+    .str.replace(",",".",regex=False)
     .astype(float)
 )
 
 # ========================= DEMANDAS =========================
-dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
-dc.columns = ["Codigo", "Demanda Pedido"]
+dc = perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
+dc.columns = ["Codigo","Demanda Pedido"]
 
-op = perfil[perfil["Tipo"] == "OP"].groupby("Item")["Quantidade"].sum().reset_index()
-op.columns = ["Codigo", "Qtde Pendente OP"]
+# 🔥 ORDENS LIBERADAS (MAIS SEGURO)
+tipos_op = ["OP","ORDEM","LIBERADA"]
+
+op = perfil[perfil["Tipo"].isin(tipos_op)].groupby("Item")["Quantidade"].sum().reset_index()
+op.columns = ["Codigo","Qtde Pendente OP"]
 
 # ========================= MERGE =========================
-df = base.merge(saldo_base, on="Codigo", how="left")
-df = df.merge(dc, on="Codigo", how="left")
-df = df.merge(op, on="Codigo", how="left")
+df = base.merge(saldo_base,on="Codigo",how="left")
+df = df.merge(dc,on="Codigo",how="left")
+df = df.merge(op,on="Codigo",how="left")
 
 df = df.fillna(0)
 
+# ========================= CÁLCULOS =========================
 df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
 df["Saldo Real"] = (
@@ -155,30 +109,29 @@ def status(row):
 
 df["Status"] = df.apply(status, axis=1)
 
+# ========================= CARDS (FUNCIONAIS) =========================
+if "filtro" not in st.session_state:
+    st.session_state.filtro = "TODOS"
+
+c1,c2,c3,c4 = st.columns(4)
+
+if c1.button(f"TOTAL\n{len(df)}"):
+    st.session_state.filtro = "TODOS"
+
+if c2.button(f"FALTA\n{(df['Status']=='FALTA').sum()}"):
+    st.session_state.filtro = "FALTA"
+
+if c3.button(f"RISCO\n{(df['Status']=='RISCO').sum()}"):
+    st.session_state.filtro = "RISCO"
+
+if c4.button(f"OK\n{(df['Status']=='OK').sum()}"):
+    st.session_state.filtro = "OK"
+
 # ========================= FILTRO =========================
-if "filtro_status" not in st.session_state:
-    st.session_state.filtro_status = "TODOS"
-
-col1, col2, col3, col4 = st.columns(4)
-
-def card(col, titulo, valor, tipo):
-    selecionado = st.session_state.filtro_status == tipo
-    classe = f"card {tipo.lower()} {'selected' if selecionado else ''}"
-    if col.button(f"{titulo}\n{valor}"):
-        st.session_state.filtro_status = tipo
-
-    col.markdown(f"<div class='{classe}'>{titulo}<br><h2>{valor}</h2></div>", unsafe_allow_html=True)
-
-card(col1, "TOTAL", len(df), "TODOS")
-card(col2, "FALTA", int((df["Status"]=="FALTA").sum()), "FALTA")
-card(col3, "RISCO", int((df["Status"]=="RISCO").sum()), "RISCO")
-card(col4, "OK", int((df["Status"]=="OK").sum()), "OK")
-
-# ========================= FILTRAGEM =========================
-if st.session_state.filtro_status == "TODOS":
+if st.session_state.filtro == "TODOS":
     df_filtrado = df.copy()
 else:
-    df_filtrado = df[df["Status"] == st.session_state.filtro_status]
+    df_filtrado = df[df["Status"] == st.session_state.filtro]
 
 # ========================= BUSCA =========================
 busca = st.text_input("Buscar")
@@ -189,20 +142,17 @@ if busca:
         df_filtrado["Descricao"].astype(str).str.contains(busca, case=False)
     ]
 
-# ========================= COR NA TABELA =========================
-def cor_linha(row):
-    if row["Status"] == "FALTA":
-        return ["background-color: #fee2e2"] * len(row)
-    elif row["Status"] == "RISCO":
-        return ["background-color: #fef3c7"] * len(row)
-    elif row["Status"] == "OK":
-        return ["background-color: #dcfce7"] * len(row)
-    return [""] * len(row)
+# ========================= COR NA LINHA =========================
+def cor(row):
+    if row["Status"]=="FALTA":
+        return ["background-color:#fecaca"]*len(row)
+    if row["Status"]=="RISCO":
+        return ["background-color:#fde68a"]*len(row)
+    if row["Status"]=="OK":
+        return ["background-color:#bbf7d0"]*len(row)
+    return [""]*len(row)
 
-df_styled = df_filtrado.style.apply(cor_linha, axis=1)
-
-# ========================= TABELA =========================
-st.dataframe(df_styled, use_container_width=True)
+st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= DOWNLOAD =========================
-botao_downloads(df_filtrado)
+st.download_button("Baixar CSV", df_filtrado.to_csv(index=False), "pcp.csv")
