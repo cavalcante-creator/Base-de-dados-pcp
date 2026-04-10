@@ -1,261 +1,92 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-import pytz
-
-st.set_page_config(page_title="Dashboard PCP", layout="wide")
-
-st.markdown("""
-<style>
-    .main {
-        background: linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
-    }
-
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-
-    h1, h2, h3 {
-        color: #12344d;
-        font-weight: 700;
-    }
-
-    div[data-testid="stAlert"] {
-        border-radius: 14px;
-        border: 1px solid #d7e3ee;
-    }
-
-    div.stButton > button {
-        background: linear-gradient(90deg, #0f766e, #0ea5a4);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 0.6rem 1.2rem;
-        font-weight: 600;
-    }
-
-    div.stButton > button:hover {
-        background: linear-gradient(90deg, #0b5f59, #0b8f8d);
-        color: white;
-    }
-
-    div[data-testid="stDownloadButton"] > button {
-        background: white;
-        color: #12344d;
-        border: 1px solid #c9d9e6;
-        border-radius: 12px;
-        font-weight: 600;
-    }
-
-    div[data-testid="stFileUploader"] {
-        background: white;
-        border: 1px dashed #aac4d6;
-        border-radius: 16px;
-        padding: 10px;
-    }
-
-    div[data-testid="stDataFrame"] {
-        background: white;
-        border-radius: 16px;
-        padding: 8px;
-        border: 1px solid #dbe7f0;
-        box-shadow: 0 4px 14px rgba(18, 52, 77, 0.05);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-fuso = pytz.timezone("America/Sao_Paulo")
-
-def agora():
-    return datetime.now(fuso)
-
-st.title("Dashboard PCP")
-
-if "previsao_df" not in st.session_state:
-    st.session_state["previsao_df"] = pd.DataFrame()
-
-if "saldo_df" not in st.session_state:
-    st.session_state["saldo_df"] = pd.DataFrame()
-
-if "perfil_df" not in st.session_state:
-    st.session_state["perfil_df"] = pd.DataFrame()
-
-previsao = st.session_state["previsao_df"]
-saldo = st.session_state["saldo_df"]
-perfil = st.session_state["perfil_df"]
-
-if previsao.empty or saldo.empty or perfil.empty:
-    st.warning("Faça o processamento dos arquivos antes de acessar o dashboard.")
-    st.stop()
-
-base = previsao[["COD", "PRODUTO"]].copy()
-base.columns = ["Codigo", "Descricao"]
-
-saldo_base = saldo[["Codigo", "Saldo Total", "Saldo Almox 3"]].copy()
-
-perfil["Quantidade"] = (
-    perfil["Quantidade"]
-    .astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-)
-
-perfil["Quantidade"] = pd.to_numeric(
-    perfil["Quantidade"],
-    errors="coerce"
-).fillna(0)
-
-perfil["Data Fim"] = pd.to_datetime(
-    perfil["Data Fim"],
-    dayfirst=True,
-    errors="coerce"
-)
-
-perfil["Referencia"] = (
-    perfil["Data Fim"].dt.isocalendar().week.astype(str).str.zfill(2)
-    + "."
-    + perfil["Data Fim"].dt.year.astype(str)
-)
-
-semana = agora().isocalendar()[1]
-ano = agora().year
-referencia_atual = str(semana).zfill(2) + "." + str(ano)
-
-dc = (
-    perfil[perfil["Tipo"] == "DC"]
-    .groupby("Item")["Quantidade"]
-    .sum()
-    .reset_index()
-)
-dc.columns = ["Codigo", "Demanda Pedido"]
-
-dp = (
-    perfil[perfil["Tipo"] == "DP"]
-    .groupby("Item")["Quantidade"]
-    .sum()
-    .reset_index()
-)
-dp.columns = ["Codigo", "Demanda DP"]
-
-dp_sem = (
-    perfil[
-        (perfil["Tipo"] == "DP") &
-        (perfil["Referencia"] == referencia_atual)
-    ]
-    .groupby("Item")["Quantidade"]
-    .sum()
-    .reset_index()
-)
-dp_sem.columns = ["Codigo", "DP Semana Atual"]
-
-df = base.merge(saldo_base, on="Codigo", how="left")
-df = df.merge(dc, on="Codigo", how="left")
-df = df.merge(dp, on="Codigo", how="left")
-df = df.merge(dp_sem, on="Codigo", how="left")
-
-colunas_numericas = [
-    "Saldo Total",
-    "Saldo Almox 3",
-    "Demanda Pedido",
-    "Demanda DP",
-    "DP Semana Atual"
-]
-
-for coluna in colunas_numericas:
-    df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
-
-df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
-
-def definir_status(row):
+# =========================
+# STATUS AUTOMÁTICO
+# =========================
+def status(row):
     if row["Saldo vs Demanda"] < 0:
         return "FALTA"
-    elif row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+    if row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
         return "RISCO"
-    else:
-        return "OK"
+    return "OK"
 
-df["Status"] = df.apply(definir_status, axis=1)
+df["Status Auto"] = df.apply(status, axis=1)
 
-st.subheader("Resumo Geral")
+# =========================
+# STATUS MANUAL (NOVO)
+# =========================
+if "Status Manual" not in st.session_state:
+    st.session_state["Status Manual"] = {}
 
+df["Status Manual"] = df["Codigo"].map(st.session_state["Status Manual"])
+
+# PRIORIDADE: MANUAL > AUTO
+df["Status Final"] = df["Status Manual"].fillna(df["Status Auto"])
+
+# =========================
+# CARDS (USANDO STATUS FINAL)
+# =========================
 col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total de Itens", len(df))
+col2.metric("Itens em Falta", int((df["Status Final"] == "FALTA").sum()))
+col3.metric("Itens em Risco", int((df["Status Final"] == "RISCO").sum()))
+col4.metric("Itens OK", int((df["Status Final"] == "OK").sum()))
 
-with col1:
-    st.metric("Total de Itens", len(df))
+st.markdown("---")
 
-with col2:
-    st.metric("Itens em Falta", int((df['Status'] == 'FALTA').sum()))
+# =========================
+# FILTROS
+# =========================
+col_filtro1, col_filtro2 = st.columns([1, 2])
 
-with col3:
-    st.metric("Itens em Risco", int((df['Status'] == 'RISCO').sum()))
-
-with col4:
-    st.metric("Itens OK", int((df['Status'] == 'OK').sum()))
-
-col_busca1, col_busca2 = st.columns([2, 1])
-
-with col_busca1:
-    busca = st.text_input("Buscar código ou descrição")
-
-with col_busca2:
-    ordenar = st.selectbox(
-        "Ordenar por",
-        [
-            "Codigo",
-            "Descricao",
-            "Saldo Total",
-            "Demanda Pedido",
-            "Saldo vs Demanda"
-        ]
+with col_filtro1:
+    opcoes_status = ["FALTA", "RISCO", "OK"]
+    status_selecionado = st.multiselect(
+        "Filtrar Status",
+        options=opcoes_status,
+        default=opcoes_status
     )
 
-df_filtrado = df.copy()
+with col_filtro2:
+    texto_busca = st.text_input("Buscar por código ou descrição")
 
-if busca:
-    busca = busca.lower()
+df_filtrado = df[df["Status Final"].isin(status_selecionado)].copy()
 
+if texto_busca:
+    filtro = texto_busca.strip().lower()
     df_filtrado = df_filtrado[
-        df_filtrado["Codigo"].astype(str).str.lower().str.contains(busca, na=False) |
-        df_filtrado["Descricao"].astype(str).str.lower().str.contains(busca, na=False)
+        df_filtrado["Codigo"].astype(str).str.lower().str.contains(filtro, na=False) |
+        df_filtrado["Descricao"].astype(str).str.lower().str.contains(filtro, na=False)
     ]
 
-df_filtrado = df_filtrado.sort_values(by=ordenar)
+# =========================
+# GRÁFICO
+# =========================
+st.subheader("Visão Geral por Status")
+st.bar_chart(df["Status Final"].value_counts())
 
-def colorir_status(valor):
-    if valor == "FALTA":
-        return "background-color: #f8d7da; color: #842029; font-weight: bold;"
-    elif valor == "RISCO":
-        return "background-color: #fff3cd; color: #664d03; font-weight: bold;"
-    elif valor == "OK":
-        return "background-color: #d1e7dd; color: #0f5132; font-weight: bold;"
-    return ""
+# =========================
+# TABELA EDITÁVEL (NOVO)
+# =========================
+st.subheader("Tabela de Análise (com ajuste manual)")
 
-def colorir_saldo(valor):
-    try:
-        valor = float(valor)
-    except:
-        return ""
-
-    if valor < 0:
-        return "background-color: #f8d7da; color: #842029;"
-    elif valor == 0:
-        return "background-color: #fff3cd; color: #664d03;"
-    else:
-        return "background-color: #d1e7dd; color: #0f5132;"
-
-styled_df = df_filtrado.style.map(
-    colorir_status,
-    subset=["Status"]
-).map(
-    colorir_saldo,
-    subset=["Saldo Total", "Saldo Almox 3", "Saldo vs Demanda"]
-)
-
-st.subheader("Tabela de Análise")
-
-st.dataframe(
-    styled_df,
+df_editado = st.data_editor(
+    df_filtrado,
+    column_config={
+        "Status Manual": st.column_config.SelectboxColumn(
+            "Status Manual",
+            options=["FALTA", "RISCO", "OK"],
+            required=False
+        )
+    },
     use_container_width=True,
-    height=600
+    key="editor"
 )
+
+# SALVAR ALTERAÇÕES
+for _, row in df_editado.iterrows():
+    if pd.notna(row["Status Manual"]):
+        st.session_state["Status Manual"][row["Codigo"]] = row["Status Manual"]
+
+# =========================
+# DOWNLOAD
+# =========================
+botao_downloads(df_editado, "dashboard_pcp", "Dashboard_PCP")
