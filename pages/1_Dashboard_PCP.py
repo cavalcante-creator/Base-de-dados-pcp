@@ -1,15 +1,12 @@
+```python
 import streamlit as st
 import pandas as pd
-import re
 from datetime import datetime
 
 st.set_page_config(page_title="Dashboard PCP", layout="wide")
 
 st.title("Dashboard PCP")
 
-# =========================
-# LEITURA DA BASE
-# =========================
 arquivo = st.file_uploader("Selecione a base Excel", type=["xlsx"])
 
 if arquivo is not None:
@@ -33,7 +30,7 @@ if arquivo is not None:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     # =========================
-    # PEGAR SEMPRE O ÚLTIMO PROCESSAMENTO
+    # PEGAR ÚLTIMO PROCESSAMENTO
     # =========================
     if "DataHora_Processamento" in df.columns:
         df["DataHora_Processamento"] = pd.to_datetime(
@@ -72,7 +69,7 @@ if arquivo is not None:
         df["Status"] = "OK"
 
     # =========================
-    # FILTROS LATERAIS
+    # FILTROS SIDEBAR
     # =========================
     st.sidebar.header("Filtros")
 
@@ -83,10 +80,22 @@ if arquivo is not None:
     filtro_status_sidebar = st.sidebar.selectbox("Status", status_opcoes)
 
     if busca_codigo:
-        df = df[df["Codigo"].astype(str).str.contains(busca_codigo, case=False, na=False)]
+        df = df[
+            df["Codigo"].astype(str).str.contains(
+                busca_codigo,
+                case=False,
+                na=False
+            )
+        ]
 
     if busca_descricao:
-        df = df[df["Descricao"].astype(str).str.contains(busca_descricao, case=False, na=False)]
+        df = df[
+            df["Descricao"].astype(str).str.contains(
+                busca_descricao,
+                case=False,
+                na=False
+            )
+        ]
 
     if filtro_status_sidebar != "TODOS":
         df = df[df["Status"] == filtro_status_sidebar]
@@ -95,41 +104,41 @@ if arquivo is not None:
     # BOTÕES DE STATUS
     # =========================
     if "filtro_status" not in st.session_state:
-        st.session_state.filtro_status = "TODOS"
-
-    col1, col2, col3, col4, col5 = st.columns(5)
+        st.session_state["filtro_status"] = "TODOS"
 
     total_itens = len(df)
     total_ok = len(df[df["Status"] == "OK"])
+    total_atencao = len(df[df["Status"] == "ATENCAO"])
     total_risco = len(df[df["Status"] == "RISCO"])
     total_falta = len(df[df["Status"] == "FALTA"])
-    total_atencao = len(df[df["Status"] == "ATENCAO"])
+
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        if st.button(f"TODOS\n{total_itens}", use_container_width=True):
-            st.session_state.filtro_status = "TODOS"
+        if st.button("TODOS (" + str(total_itens) + ")", use_container_width=True):
+            st.session_state["filtro_status"] = "TODOS"
 
     with col2:
-        if st.button(f"OK\n{total_ok}", use_container_width=True):
-            st.session_state.filtro_status = "OK"
+        if st.button("OK (" + str(total_ok) + ")", use_container_width=True):
+            st.session_state["filtro_status"] = "OK"
 
     with col3:
-        if st.button(f"ATENCAO\n{total_atencao}", use_container_width=True):
-            st.session_state.filtro_status = "ATENCAO"
+        if st.button("ATENCAO (" + str(total_atencao) + ")", use_container_width=True):
+            st.session_state["filtro_status"] = "ATENCAO"
 
     with col4:
-        if st.button(f"RISCO\n{total_risco}", use_container_width=True):
-            st.session_state.filtro_status = "RISCO"
+        if st.button("RISCO (" + str(total_risco) + ")", use_container_width=True):
+            st.session_state["filtro_status"] = "RISCO"
 
     with col5:
-        if st.button(f"FALTA\n{total_falta}", use_container_width=True):
-            st.session_state.filtro_status = "FALTA"
+        if st.button("FALTA (" + str(total_falta) + ")", use_container_width=True):
+            st.session_state["filtro_status"] = "FALTA"
 
     # =========================
-    # APLICAR FILTRO DOS BOTÕES
+    # FILTRO DOS BOTÕES
     # =========================
-    if st.session_state.filtro_status != "TODOS":
-        df_filtrado = df[df["Status"] == st.session_state.filtro_status]
+    if st.session_state["filtro_status"] != "TODOS":
+        df_filtrado = df[df["Status"] == st.session_state["filtro_status"]]
     else:
         df_filtrado = df.copy()
 
@@ -163,7 +172,7 @@ if arquivo is not None:
             return ""
 
     # =========================
-    # MÉTRICAS SUPERIORES
+    # MÉTRICAS
     # =========================
     st.subheader("Resumo Geral")
 
@@ -182,26 +191,26 @@ if arquivo is not None:
         st.metric("Itens em Falta", total_falta)
 
     # =========================
-    # TABELA FINAL
+    # TABELA
     # =========================
     st.subheader("Tabela de Itens")
 
     st.dataframe(
         df_filtrado.style
-        .applymap(colorir_status, subset=["Status"])
-        .applymap(colorir_saldo, subset=["Saldo Almox 1", "Saldo Total"]),
+        .map(colorir_status, subset=["Status"])
+        .map(colorir_saldo, subset=["Saldo Almox 1", "Saldo Total"]),
         use_container_width=True,
         height=600
     )
 
     # =========================
-    # DOWNLOAD DA BASE FILTRADA
+    # DOWNLOAD CSV
     # =========================
-    excel_bytes = df_filtrado.to_csv(index=False).encode("utf-8")
+    csv = df_filtrado.to_csv(index=False).encode("utf-8")
 
     st.download_button(
         label="Baixar Dados Filtrados",
-        data=excel_bytes,
+        data=csv,
         file_name="dashboard_filtrado.csv",
         mime="text/csv"
     )
