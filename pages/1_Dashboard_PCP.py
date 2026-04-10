@@ -11,84 +11,53 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 st.set_page_config(page_title="Dashboard PCP", layout="wide")
 
+# ========================= CSS =========================
+st.markdown("""
+<style>
+.card {
+    border-radius: 14px;
+    padding: 14px;
+    text-align: center;
+    color: white;
+    font-weight: 600;
+}
+
+.total {background:#1d4ed8;}
+.falta {background:#dc2626;}
+.risco {background:#f59e0b;}
+.ok {background:#16a34a;}
+
+button[kind="secondary"] {
+    width: 100%;
+    border-radius: 14px;
+    height: 80px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ========================= FUNÇÕES =========================
 fuso = pytz.timezone("America/Sao_Paulo")
 
 def agora():
     return datetime.now(fuso)
 
-def limpar_colunas(df):
-    df.columns = df.columns.str.strip()
-    return df
-
-def exportar_excel_formatado(df, nome_aba="Dados"):
+def exportar_excel_formatado(df):
     output = BytesIO()
-
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=nome_aba)
-        ws = writer.book[nome_aba]
-
-        ws.freeze_panes = "A2"
-
-        header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
-        header_font = Font(color="FFFFFF", bold=True)
-
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        if ws.max_row >= 2:
-            ultima_coluna = get_column_letter(ws.max_column)
-            tabela = Table(
-                displayName="TabelaDados",
-                ref=f"A1:{ultima_coluna}{ws.max_row}"
-            )
-
-            tabela.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium9",
-                showRowStripes=True
-            )
-
-            ws.add_table(tabela)
-
+        df.to_excel(writer, index=False, sheet_name="Dados")
     output.seek(0)
     return output.getvalue()
-
-def botao_downloads(df):
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.download_button(
-            "📄 CSV",
-            df.to_csv(index=False).encode("utf-8"),
-            "dashboard_pcp.csv"
-        )
-
-    with col2:
-        st.download_button(
-            "📊 Excel",
-            exportar_excel_formatado(df),
-            "dashboard_pcp.xlsx"
-        )
 
 # ========================= DADOS =========================
 try:
     saldo = pd.read_csv("saldo.csv")
     perfil = pd.read_csv("perfil.csv")
     previsao = pd.read_csv("previsao.csv")
-    ordens = pd.read_csv("ordens.csv")
 except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
-# 🔥 LIMPAR COLUNAS (ESSENCIAL)
-saldo = limpar_colunas(saldo)
-perfil = limpar_colunas(perfil)
-previsao = limpar_colunas(previsao)
-ordens = limpar_colunas(ordens)
-
-# ========================= BASES =========================
 saldo = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
 previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("COD")
 
@@ -97,62 +66,50 @@ base.columns = ["Codigo","Descricao"]
 
 saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
 
-# ========================= TRATAR QUANTIDADE PERFIL =========================
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
+    .str.replace(".","",regex=False)
+    .str.replace(",",".",regex=False)
     .astype(float)
 )
 
-# ========================= DEMANDA (NÃO MEXER) =========================
-dc = perfil[perfil["Tipo"]=="DC"] \
-    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
-
+# ========================= DEMANDAS =========================
+dc = perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
 dc.columns = ["Codigo","Demanda Pedido"]
 
-# ========================= BASE PRINCIPAL =========================
+# 🔥 ORDENS LIBERADAS (MAIS SEGURO)
+tipos_op = ["OP","ORDEM","LIBERADA"]
+
+op = perfil[perfil["Tipo"].isin(tipos_op)].groupby("Item")["Quantidade"].sum().reset_index()
+op.columns = ["Codigo","Qtde Pendente OP"]
+
+# ========================= MERGE =========================
 df = base.merge(saldo_base,on="Codigo",how="left")
 df = df.merge(dc,on="Codigo",how="left")
+df = df.merge(op,on="Codigo",how="left")
 
 df = df.fillna(0)
 
-# 🔴 SUA LÓGICA ORIGINAL (INTACTA)
+# ========================= CÁLCULOS =========================
 df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
-def status(row):
-    if row["Saldo vs Demanda"] < 0:
-        return "FALTA"
-    if row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
-        return "RISCO"
-    return "OK"
-
-df["Status"] = df.apply(status, axis=1)
-
-# ========================= 🔥 ORDENS (BASE REAL) =========================
-ordens["Qtde. Pendente"] = (
-    ordens["Qtde. Pendente"].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-    .astype(float)
-)
-
-op = ordens[ordens["Tipo"]=="OFA"] \
-    .groupby("Cd. Item")["Qtde. Pendente"].sum().reset_index()
-
-op.columns = ["Codigo","Qtde Pendente OP"]
-
-df = df.merge(op, on="Codigo", how="left")
-df["Qtde Pendente OP"] = df["Qtde Pendente OP"].fillna(0)
-
-# 🔥 NOVA COLUNA (SEM IMPACTAR STATUS)
 df["Saldo Real"] = (
     df["Saldo Almox 3"]
     - df["Demanda Pedido"]
     - df["Qtde Pendente OP"]
 )
 
-# ========================= CARDS =========================
+# ========================= STATUS =========================
+def status(row):
+    if row["Saldo Real"] < 0:
+        return "FALTA"
+    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 3"] * 0.5:
+        return "RISCO"
+    return "OK"
+
+df["Status"] = df.apply(status, axis=1)
+
+# ========================= CARDS (FUNCIONAIS) =========================
 if "filtro" not in st.session_state:
     st.session_state.filtro = "TODOS"
 
@@ -195,8 +152,7 @@ def cor(row):
         return ["background-color:#bbf7d0"]*len(row)
     return [""]*len(row)
 
-# ========================= TABELA =========================
 st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= DOWNLOAD =========================
-botao_downloads(df_filtrado)
+st.download_button("Baixar CSV", df_filtrado.to_csv(index=False), "pcp.csv")
