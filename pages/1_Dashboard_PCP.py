@@ -1,3 +1,13 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import pytz
+
+fuso = pytz.timezone("America/Sao_Paulo")
+
+def agora():
+    return datetime.now(fuso)
+
 if "previsao_df" not in st.session_state:
     st.session_state["previsao_df"] = pd.DataFrame()
 
@@ -10,6 +20,8 @@ if "perfil_df" not in st.session_state:
 previsao = st.session_state["previsao_df"]
 saldo = st.session_state["saldo_df"]
 perfil = st.session_state["perfil_df"]
+
+st.set_page_config(page_title="Dashboard PCP", layout="wide")
 
 st.title("Dashboard PCP")
 
@@ -222,5 +234,3 @@ st.dataframe(
     use_container_width=True,
     height=600
 )
-
-botao_downloads(df_filtrado, "dashboard_pcp", "Dashboard_PCP")
