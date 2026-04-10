@@ -11,43 +11,69 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 st.set_page_config(page_title="Dashboard PCP", layout="wide")
 
-# ========================= CSS =========================
-st.markdown("""
-<style>
-.card {
-    border-radius: 14px;
-    padding: 14px;
-    text-align: center;
-    color: white;
-    font-weight: 600;
-}
-
-.total {background:#1d4ed8;}
-.falta {background:#dc2626;}
-.risco {background:#f59e0b;}
-.ok {background:#16a34a;}
-
-button[kind="secondary"] {
-    width: 100%;
-    border-radius: 14px;
-    height: 80px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ========================= FUNÇÕES =========================
 fuso = pytz.timezone("America/Sao_Paulo")
 
 def agora():
     return datetime.now(fuso)
 
-def exportar_excel_formatado(df):
+def exportar_excel_formatado(df, nome_aba="Dados"):
     output = BytesIO()
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Dados")
+        df.to_excel(writer, index=False, sheet_name=nome_aba)
+        ws = writer.book[nome_aba]
+
+        ws.freeze_panes = "A2"
+
+        header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
+        header_font = Font(color="FFFFFF", bold=True)
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        if ws.max_row >= 2 and ws.max_column >= 1:
+            ultima_coluna = get_column_letter(ws.max_column)
+            nome_tabela = re.sub(r"\W+", "", nome_aba) or "Dados"
+
+            tabela = Table(
+                displayName=f"Tabela{nome_tabela[:20]}",
+                ref=f"A1:{ultima_coluna}{ws.max_row}"
+            )
+
+            tabela.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium9",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False
+            )
+
+            ws.add_table(tabela)
+
     output.seek(0)
     return output.getvalue()
+
+def botao_downloads(df):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.download_button(
+            "📄 Baixar CSV",
+            df.to_csv(index=False).encode("utf-8"),
+            "dashboard_pcp.csv",
+            mime="text/csv"
+        )
+
+    with col2:
+        st.download_button(
+            "📊 Baixar Excel Formatado",
+            exportar_excel_formatado(df),
+            "dashboard_pcp.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ========================= DADOS =========================
 try:
@@ -74,13 +100,14 @@ perfil["Quantidade"] = (
 )
 
 # ========================= DEMANDAS =========================
-dc = perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
+dc = perfil[perfil["Tipo"]=="DC"] \
+    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
 dc.columns = ["Codigo","Demanda Pedido"]
 
-# 🔥 ORDENS LIBERADAS (MAIS SEGURO)
 tipos_op = ["OP","ORDEM","LIBERADA"]
 
-op = perfil[perfil["Tipo"].isin(tipos_op)].groupby("Item")["Quantidade"].sum().reset_index()
+op = perfil[perfil["Tipo"].isin(tipos_op)] \
+    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
 op.columns = ["Codigo","Qtde Pendente OP"]
 
 # ========================= MERGE =========================
@@ -109,11 +136,11 @@ def status(row):
 
 df["Status"] = df.apply(status, axis=1)
 
-# ========================= CARDS (FUNCIONAIS) =========================
+# ========================= CARDS =========================
 if "filtro" not in st.session_state:
     st.session_state.filtro = "TODOS"
 
-c1,c2,c3,c4 = st.columns(4)
+c1, c2, c3, c4 = st.columns(4)
 
 if c1.button(f"TOTAL\n{len(df)}"):
     st.session_state.filtro = "TODOS"
@@ -134,7 +161,7 @@ else:
     df_filtrado = df[df["Status"] == st.session_state.filtro]
 
 # ========================= BUSCA =========================
-busca = st.text_input("Buscar")
+busca = st.text_input("Buscar por código ou descrição")
 
 if busca:
     df_filtrado = df_filtrado[
@@ -144,15 +171,16 @@ if busca:
 
 # ========================= COR NA LINHA =========================
 def cor(row):
-    if row["Status"]=="FALTA":
-        return ["background-color:#fecaca"]*len(row)
-    if row["Status"]=="RISCO":
-        return ["background-color:#fde68a"]*len(row)
-    if row["Status"]=="OK":
-        return ["background-color:#bbf7d0"]*len(row)
-    return [""]*len(row)
+    if row["Status"] == "FALTA":
+        return ["background-color:#fecaca"] * len(row)
+    elif row["Status"] == "RISCO":
+        return ["background-color:#fde68a"] * len(row)
+    elif row["Status"] == "OK":
+        return ["background-color:#bbf7d0"] * len(row)
+    return [""] * len(row)
 
+# ========================= TABELA =========================
 st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= DOWNLOAD =========================
-st.download_button("Baixar CSV", df_filtrado.to_csv(index=False), "pcp.csv")
+botao_downloads(df_filtrado)
