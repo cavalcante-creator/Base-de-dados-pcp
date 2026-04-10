@@ -45,10 +45,7 @@ def exportar_excel_formatado(df, nome_aba="Dados"):
 
             tabela.tableStyleInfo = TableStyleInfo(
                 name="TableStyleMedium9",
-                showFirstColumn=False,
-                showLastColumn=False,
-                showRowStripes=True,
-                showColumnStripes=False
+                showRowStripes=True
             )
 
             ws.add_table(tabela)
@@ -61,18 +58,16 @@ def botao_downloads(df):
 
     with col1:
         st.download_button(
-            "📄 Baixar CSV",
+            "📄 CSV",
             df.to_csv(index=False).encode("utf-8"),
-            "dashboard_pcp.csv",
-            mime="text/csv"
+            "dashboard_pcp.csv"
         )
 
     with col2:
         st.download_button(
-            "📊 Baixar Excel Formatado",
+            "📊 Excel",
             exportar_excel_formatado(df),
-            "dashboard_pcp.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "dashboard_pcp.xlsx"
         )
 
 # ========================= DADOS =========================
@@ -80,6 +75,7 @@ try:
     saldo = pd.read_csv("saldo.csv")
     perfil = pd.read_csv("perfil.csv")
     previsao = pd.read_csv("previsao.csv")
+    ordens = pd.read_csv("ordens.csv")  # 🔥 NOVO (SEM IMPACTAR NADA)
 except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
@@ -94,47 +90,57 @@ saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
-    .str.replace(".","",regex=False)
-    .str.replace(",",".",regex=False)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
     .astype(float)
 )
 
-# ========================= DEMANDAS =========================
+# ========================= DEMANDA ORIGINAL (NÃO MEXER) =========================
 dc = perfil[perfil["Tipo"]=="DC"] \
     .groupby("Cd. Item")["Quantidade"].sum().reset_index()
+
 dc.columns = ["Codigo","Demanda Pedido"]
 
-tipos_op = ["OP","ORDEM","LIBERADA"]
-
-op = perfil[perfil["Tipo"].isin(tipos_op)] \
-    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
-op.columns = ["Codigo","Qtde Pendente OP"]
-
-# ========================= MERGE =========================
+# ========================= BASE PRINCIPAL =========================
 df = base.merge(saldo_base,on="Codigo",how="left")
 df = df.merge(dc,on="Codigo",how="left")
-df = df.merge(op,on="Codigo",how="left")
 
 df = df.fillna(0)
 
-# ========================= CÁLCULOS =========================
+# 🔴 NÃO MEXER (SUA LÓGICA ORIGINAL)
 df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
+def status(row):
+    if row["Saldo vs Demanda"] < 0:
+        return "FALTA"
+    if row["Demanda Pedido"] >= row["Saldo Almox 3"] * 0.5:
+        return "RISCO"
+    return "OK"
+
+df["Status"] = df.apply(status, axis=1)
+
+# ========================= 🔥 NOVO BLOCO (ORDENS - NÃO INTERFERE) =========================
+ordens["Quantidade"] = (
+    ordens["Quantidade"].astype(str)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
+    .astype(float)
+)
+
+op = ordens[ordens["Tipo"] == "OFA"] \
+    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
+
+op.columns = ["Codigo","Qtde Pendente OP"]
+
+df = df.merge(op, on="Codigo", how="left")
+df["Qtde Pendente OP"] = df["Qtde Pendente OP"].fillna(0)
+
+# 🔥 NOVA COLUNA (APENAS ANALÍTICA)
 df["Saldo Real"] = (
     df["Saldo Almox 3"]
     - df["Demanda Pedido"]
     - df["Qtde Pendente OP"]
 )
-
-# ========================= STATUS =========================
-def status(row):
-    if row["Saldo Real"] < 0:
-        return "FALTA"
-    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 3"] * 0.5:
-        return "RISCO"
-    return "OK"
-
-df["Status"] = df.apply(status, axis=1)
 
 # ========================= CARDS =========================
 if "filtro" not in st.session_state:
