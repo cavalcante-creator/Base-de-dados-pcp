@@ -1,7 +1,5 @@
-```python
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 st.set_page_config(page_title="Dashboard PCP", layout="wide")
 
@@ -12,9 +10,6 @@ arquivo = st.file_uploader("Selecione a base Excel", type=["xlsx"])
 if arquivo is not None:
     df = pd.read_excel(arquivo)
 
-    # =========================
-    # AJUSTE DAS COLUNAS NUMÉRICAS
-    # =========================
     colunas_numericas = [
         "Saldo Almox 1",
         "Saldo Almox 2",
@@ -29,9 +24,6 @@ if arquivo is not None:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # =========================
-    # PEGAR ÚLTIMO PROCESSAMENTO
-    # =========================
     if "DataHora_Processamento" in df.columns:
         df["DataHora_Processamento"] = pd.to_datetime(
             df["DataHora_Processamento"],
@@ -41,9 +33,6 @@ if arquivo is not None:
         df = df.sort_values("DataHora_Processamento", ascending=False)
         df = df.drop_duplicates(subset=["Codigo"], keep="first")
 
-    # =========================
-    # DEFINIR STATUS
-    # =========================
     def definir_status(row):
         saldo = row.get("Saldo Total", 0)
         demanda = row.get("Demanda", 0)
@@ -68,9 +57,6 @@ if arquivo is not None:
     else:
         df["Status"] = "OK"
 
-    # =========================
-    # FILTROS SIDEBAR
-    # =========================
     st.sidebar.header("Filtros")
 
     busca_codigo = st.sidebar.text_input("Buscar Código")
@@ -100,9 +86,6 @@ if arquivo is not None:
     if filtro_status_sidebar != "TODOS":
         df = df[df["Status"] == filtro_status_sidebar]
 
-    # =========================
-    # BOTÕES DE STATUS
-    # =========================
     if "filtro_status" not in st.session_state:
         st.session_state["filtro_status"] = "TODOS"
 
@@ -115,36 +98,30 @@ if arquivo is not None:
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        if st.button("TODOS (" + str(total_itens) + ")", use_container_width=True):
+        if st.button(f"TODOS ({total_itens})", use_container_width=True):
             st.session_state["filtro_status"] = "TODOS"
 
     with col2:
-        if st.button("OK (" + str(total_ok) + ")", use_container_width=True):
+        if st.button(f"OK ({total_ok})", use_container_width=True):
             st.session_state["filtro_status"] = "OK"
 
     with col3:
-        if st.button("ATENCAO (" + str(total_atencao) + ")", use_container_width=True):
+        if st.button(f"ATENCAO ({total_atencao})", use_container_width=True):
             st.session_state["filtro_status"] = "ATENCAO"
 
     with col4:
-        if st.button("RISCO (" + str(total_risco) + ")", use_container_width=True):
+        if st.button(f"RISCO ({total_risco})", use_container_width=True):
             st.session_state["filtro_status"] = "RISCO"
 
     with col5:
-        if st.button("FALTA (" + str(total_falta) + ")", use_container_width=True):
+        if st.button(f"FALTA ({total_falta})", use_container_width=True):
             st.session_state["filtro_status"] = "FALTA"
 
-    # =========================
-    # FILTRO DOS BOTÕES
-    # =========================
     if st.session_state["filtro_status"] != "TODOS":
         df_filtrado = df[df["Status"] == st.session_state["filtro_status"]]
     else:
         df_filtrado = df.copy()
 
-    # =========================
-    # CORES
-    # =========================
     def colorir_status(valor):
         if valor == "FALTA":
             return "background-color: #ff4d4d; color: white; font-weight: bold"
@@ -171,9 +148,6 @@ if arquivo is not None:
         except:
             return ""
 
-    # =========================
-    # MÉTRICAS
-    # =========================
     st.subheader("Resumo Geral")
 
     m1, m2, m3, m4 = st.columns(4)
@@ -190,22 +164,22 @@ if arquivo is not None:
     with m4:
         st.metric("Itens em Falta", total_falta)
 
-    # =========================
-    # TABELA
-    # =========================
     st.subheader("Tabela de Itens")
 
+    styled_df = df_filtrado.style.map(
+        colorir_status,
+        subset=["Status"]
+    ).map(
+        colorir_saldo,
+        subset=["Saldo Almox 1", "Saldo Total"]
+    )
+
     st.dataframe(
-        df_filtrado.style
-        .map(colorir_status, subset=["Status"])
-        .map(colorir_saldo, subset=["Saldo Almox 1", "Saldo Total"]),
+        styled_df,
         use_container_width=True,
         height=600
     )
 
-    # =========================
-    # DOWNLOAD CSV
-    # =========================
     csv = df_filtrado.to_csv(index=False).encode("utf-8")
 
     st.download_button(
@@ -214,4 +188,3 @@ if arquivo is not None:
         file_name="dashboard_filtrado.csv",
         mime="text/csv"
     )
-```
