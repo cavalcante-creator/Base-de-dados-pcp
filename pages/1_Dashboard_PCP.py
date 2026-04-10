@@ -8,6 +8,8 @@ fuso = pytz.timezone("America/Sao_Paulo")
 def agora():
     return datetime.now(fuso)
 
+st.set_page_config(page_title="Dashboard PCP", layout="wide")
+
 if "previsao_df" not in st.session_state:
     st.session_state["previsao_df"] = pd.DataFrame()
 
@@ -21,11 +23,9 @@ previsao = st.session_state["previsao_df"]
 saldo = st.session_state["saldo_df"]
 perfil = st.session_state["perfil_df"]
 
-st.set_page_config(page_title="Dashboard PCP", layout="wide")
-
 st.title("Dashboard PCP")
 
-st.info("O dashboard sempre utiliza automaticamente o último processamento disponível na base de dados.")
+st.info("O dashboard sempre utiliza automaticamente apenas o processamento mais recente de cada item.")
 
 if previsao.empty:
     st.error("Nenhuma previsão encontrada. Faça o upload e processamento da previsão.")
@@ -39,16 +39,45 @@ if perfil.empty:
     st.error("Nenhum perfil encontrado. Faça o upload e processamento do perfil.")
     st.stop()
 
+# Mantém apenas a previsão mais recente por código
 if "Data Processamento" in previsao.columns:
     previsao["Data Processamento"] = pd.to_datetime(
         previsao["Data Processamento"],
         errors="coerce"
     )
 
-    previsao = previsao.sort_values(
-        by="Data Processamento",
-        ascending=False
-    ).drop_duplicates(subset=["COD"])
+    previsao = (
+        previsao
+        .sort_values("Data Processamento", ascending=False)
+        .drop_duplicates(subset=["COD"], keep="first")
+    )
+
+# Mantém apenas o saldo mais recente por código
+if "Data Relatório" in saldo.columns:
+    saldo["Data Relatório"] = pd.to_datetime(
+        saldo["Data Relatório"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    saldo = (
+        saldo
+        .sort_values("Data Relatório", ascending=False)
+        .drop_duplicates(subset=["Codigo"], keep="first")
+    )
+
+# Mantém apenas o perfil mais recente por item
+if "Data Processamento" in perfil.columns:
+    perfil["Data Processamento"] = pd.to_datetime(
+        perfil["Data Processamento"],
+        errors="coerce"
+    )
+
+    perfil = (
+        perfil
+        .sort_values("Data Processamento", ascending=False)
+        .drop_duplicates(subset=["Item"], keep="first")
+    )
 
 base = previsao[["COD", "PRODUTO"]].copy()
 base.columns = ["Codigo", "Descricao"]
