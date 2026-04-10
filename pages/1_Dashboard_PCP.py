@@ -1,6 +1,6 @@
+import re
 from datetime import datetime
 from io import BytesIO
-import re
 
 import pandas as pd
 import pytz
@@ -10,6 +10,95 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 st.set_page_config(page_title="Dashboard PCP", layout="wide")
+
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    h1, h2, h3 {
+        color: #12344d;
+        font-weight: 700;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 14px;
+        border: 1px solid #d7e3ee;
+    }
+
+    div[data-testid="stMetric"] {
+        background: white;
+        border: 1px solid #dbe7f0;
+        border-radius: 18px;
+        padding: 14px;
+        box-shadow: 0 4px 14px rgba(18, 52, 77, 0.08);
+    }
+
+    div.stButton > button {
+        background: linear-gradient(90deg, #0f766e, #0ea5a4);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+    }
+
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #0b5f59, #0b8f8d);
+        color: white;
+    }
+
+    div[data-testid="stDownloadButton"] > button {
+        background: white;
+        color: #12344d;
+        border: 1px solid #c9d9e6;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    div[data-testid="stFileUploader"] {
+        background: white;
+        border: 1px dashed #aac4d6;
+        border-radius: 16px;
+        padding: 10px;
+    }
+
+    div[data-testid="stDataFrame"] {
+        background: white;
+        border-radius: 16px;
+        padding: 8px;
+        border: 1px solid #dbe7f0;
+        box-shadow: 0 4px 14px rgba(18, 52, 77, 0.05);
+    }
+
+    .custom-card {
+        background: white;
+        padding: 20px;
+        border-radius: 18px;
+        border: 1px solid #dbe7f0;
+        box-shadow: 0 6px 20px rgba(18, 52, 77, 0.08);
+        margin-bottom: 16px;
+    }
+
+    .small-title {
+        font-size: 14px;
+        color: #5b7488;
+        margin-bottom: 6px;
+    }
+
+    .big-number {
+        font-size: 32px;
+        font-weight: 700;
+        color: #12344d;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 fuso = pytz.timezone("America/Sao_Paulo")
 
@@ -77,7 +166,15 @@ def botao_downloads(df, nome_base, nome_aba):
         )
 
 
-st.title("Dashboard PCP")
+st.markdown("""
+<div class="custom-card">
+    <div class="small-title">Painel Gerencial</div>
+    <div class="big-number">Dashboard PCP</div>
+    <div style="color:#5b7488; margin-top:8px;">
+        Visão rápida dos itens com falta, risco e status geral da produção.
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 try:
     saldo = pd.read_csv("saldo.csv")
@@ -166,16 +263,20 @@ col4.metric("Itens OK", int((df["Status"] == "OK").sum()))
 
 st.markdown("---")
 
-opcoes_status = ["FALTA", "RISCO", "OK"]
-opcoes_disponiveis = [item for item in opcoes_status if item in df["Status"].unique()]
+col_filtro1, col_filtro2 = st.columns([1, 2])
 
-status_selecionado = st.multiselect(
-    "Filtrar Status",
-    options=opcoes_disponiveis,
-    default=opcoes_disponiveis
-)
+with col_filtro1:
+    opcoes_status = ["FALTA", "RISCO", "OK"]
+    opcoes_disponiveis = [item for item in opcoes_status if item in df["Status"].unique()]
 
-texto_busca = st.text_input("Buscar por código ou descrição")
+    status_selecionado = st.multiselect(
+        "Filtrar Status",
+        options=opcoes_disponiveis,
+        default=opcoes_disponiveis
+    )
+
+with col_filtro2:
+    texto_busca = st.text_input("Buscar por código ou descrição")
 
 if status_selecionado:
     df_filtrado = df[df["Status"].isin(status_selecionado)].copy()
@@ -189,7 +290,10 @@ if texto_busca:
         df_filtrado["Descricao"].astype(str).str.lower().str.contains(filtro, na=False)
     ]
 
+st.subheader("Visão Geral por Status")
 st.bar_chart(df["Status"].value_counts())
+
+st.subheader("Tabela de Análise")
 st.dataframe(df_filtrado, use_container_width=True)
 
 botao_downloads(df_filtrado, "dashboard_pcp", "Dashboard_PCP")
