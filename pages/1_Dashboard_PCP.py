@@ -17,6 +17,10 @@ fuso = pytz.timezone("America/Sao_Paulo")
 def agora():
     return datetime.now(fuso)
 
+def limpar_colunas(df):
+    df.columns = df.columns.str.strip()
+    return df
+
 def exportar_excel_formatado(df, nome_aba="Dados"):
     output = BytesIO()
 
@@ -68,13 +72,6 @@ def botao_downloads(df):
             "dashboard_pcp.xlsx"
         )
 
-# ========================= FUNÇÃO GENÉRICA =========================
-def achar_coluna(df, possiveis):
-    for col in possiveis:
-        if col in df.columns:
-            return col
-    return None
-
 # ========================= DADOS =========================
 try:
     saldo = pd.read_csv("saldo.csv")
@@ -85,35 +82,11 @@ except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
-# ========================= IDENTIFICAR COLUNAS =========================
-col_item_perfil = achar_coluna(perfil, ["Cd. Item","Item","Codigo","Cod Item"])
-col_item_ordens = achar_coluna(ordens, ["Cd. Item","Item","Codigo","Cod Item"])
-
-col_qtd_perfil = achar_coluna(perfil, ["Quantidade","Qtde","Qtd"])
-col_qtd_ordens = achar_coluna(ordens, ["Quantidade","Qtde","Qtd"])
-
-if not col_item_perfil or not col_qtd_perfil:
-    st.error(f"Erro no perfil.csv → {list(perfil.columns)}")
-    st.stop()
-
-if not col_item_ordens or not col_qtd_ordens:
-    st.error(f"Erro no ordens.csv → {list(ordens.columns)}")
-    st.stop()
-
-# ========================= TRATAR QUANTIDADE =========================
-perfil[col_qtd_perfil] = (
-    perfil[col_qtd_perfil].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-    .astype(float)
-)
-
-ordens[col_qtd_ordens] = (
-    ordens[col_qtd_ordens].astype(str)
-    .str.replace(".", "", regex=False)
-    .str.replace(",", ".", regex=False)
-    .astype(float)
-)
+# 🔥 LIMPAR COLUNAS (ESSENCIAL)
+saldo = limpar_colunas(saldo)
+perfil = limpar_colunas(perfil)
+previsao = limpar_colunas(previsao)
+ordens = limpar_colunas(ordens)
 
 # ========================= BASES =========================
 saldo = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
@@ -124,26 +97,27 @@ base.columns = ["Codigo","Descricao"]
 
 saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
 
-# ========================= DEMANDA =========================
+# ========================= TRATAR QUANTIDADE PERFIL =========================
+perfil["Quantidade"] = (
+    perfil["Quantidade"].astype(str)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
+    .astype(float)
+)
+
+# ========================= DEMANDA (NÃO MEXER) =========================
 dc = perfil[perfil["Tipo"]=="DC"] \
-    .groupby(col_item_perfil)[col_qtd_perfil].sum().reset_index()
+    .groupby("Cd. Item")["Quantidade"].sum().reset_index()
 
 dc.columns = ["Codigo","Demanda Pedido"]
 
-# ========================= ORDENS (OFA) =========================
-op = ordens[ordens["Tipo"]=="OFA"] \
-    .groupby(col_item_ordens)[col_qtd_ordens].sum().reset_index()
-
-op.columns = ["Codigo","Qtde Pendente OP"]
-
-# ========================= MERGE =========================
+# ========================= BASE PRINCIPAL =========================
 df = base.merge(saldo_base,on="Codigo",how="left")
 df = df.merge(dc,on="Codigo",how="left")
-df = df.merge(op,on="Codigo",how="left")
 
 df = df.fillna(0)
 
-# ========================= LÓGICA ORIGINAL =========================
+# 🔴 SUA LÓGICA ORIGINAL (INTACTA)
 df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
 def status(row):
@@ -155,7 +129,23 @@ def status(row):
 
 df["Status"] = df.apply(status, axis=1)
 
-# ========================= NOVO (SEM INTERFERIR) =========================
+# ========================= 🔥 ORDENS (BASE REAL) =========================
+ordens["Qtde. Pendente"] = (
+    ordens["Qtde. Pendente"].astype(str)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
+    .astype(float)
+)
+
+op = ordens[ordens["Tipo"]=="OFA"] \
+    .groupby("Cd. Item")["Qtde. Pendente"].sum().reset_index()
+
+op.columns = ["Codigo","Qtde Pendente OP"]
+
+df = df.merge(op, on="Codigo", how="left")
+df["Qtde Pendente OP"] = df["Qtde Pendente OP"].fillna(0)
+
+# 🔥 NOVA COLUNA (SEM IMPACTAR STATUS)
 df["Saldo Real"] = (
     df["Saldo Almox 3"]
     - df["Demanda Pedido"]
@@ -205,6 +195,7 @@ def cor(row):
         return ["background-color:#bbf7d0"]*len(row)
     return [""]*len(row)
 
+# ========================= TABELA =========================
 st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= DOWNLOAD =========================
