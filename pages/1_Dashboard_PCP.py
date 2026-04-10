@@ -10,6 +10,24 @@ arquivo = st.file_uploader("Selecione a base Excel", type=["xlsx"])
 if arquivo is not None:
     df = pd.read_excel(arquivo)
 
+    # Garantir que colunas existam
+    colunas_necessarias = [
+        "Codigo",
+        "Descricao",
+        "Saldo Almox 1",
+        "Saldo Almox 2",
+        "Saldo Almox 3",
+        "Saldo Almox 4",
+        "Saldo Total",
+        "Demanda",
+        "Produzir"
+    ]
+
+    for col in colunas_necessarias:
+        if col not in df.columns:
+            df[col] = 0
+
+    # Converter colunas numéricas
     colunas_numericas = [
         "Saldo Almox 1",
         "Saldo Almox 2",
@@ -21,27 +39,29 @@ if arquivo is not None:
     ]
 
     for col in colunas_numericas:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+    # Pegar sempre o último processamento
     if "DataHora_Processamento" in df.columns:
         df["DataHora_Processamento"] = pd.to_datetime(
             df["DataHora_Processamento"],
             errors="coerce"
         )
 
-        df = df.sort_values("DataHora_Processamento", ascending=False)
-        df = df.drop_duplicates(subset=["Codigo"], keep="first")
+        df = df.sort_values(
+            by="DataHora_Processamento",
+            ascending=False
+        )
 
+        df = df.drop_duplicates(
+            subset=["Codigo"],
+            keep="first"
+        )
+
+    # Criar status
     def definir_status(row):
-        saldo = row.get("Saldo Total", 0)
-        demanda = row.get("Demanda", 0)
-
-        try:
-            saldo = float(saldo)
-            demanda = float(demanda)
-        except:
-            return "OK"
+        saldo = row["Saldo Total"]
+        demanda = row["Demanda"]
 
         if saldo <= 0:
             return "FALTA"
@@ -52,19 +72,18 @@ if arquivo is not None:
         else:
             return "OK"
 
-    if "Saldo Total" in df.columns and "Demanda" in df.columns:
-        df["Status"] = df.apply(definir_status, axis=1)
-    else:
-        df["Status"] = "OK"
+    df["Status"] = df.apply(definir_status, axis=1)
 
+    # Sidebar
     st.sidebar.header("Filtros")
 
     busca_codigo = st.sidebar.text_input("Buscar Código")
     busca_descricao = st.sidebar.text_input("Buscar Descrição")
 
-    status_opcoes = ["TODOS"] + sorted(df["Status"].dropna().unique().tolist())
-    filtro_status_sidebar = st.sidebar.selectbox("Status", status_opcoes)
+    status_opcoes = ["TODOS", "OK", "ATENCAO", "RISCO", "FALTA"]
+    filtro_sidebar = st.sidebar.selectbox("Filtrar Status", status_opcoes)
 
+    # Aplicar busca
     if busca_codigo:
         df = df[
             df["Codigo"].astype(str).str.contains(
@@ -83,9 +102,10 @@ if arquivo is not None:
             )
         ]
 
-    if filtro_status_sidebar != "TODOS":
-        df = df[df["Status"] == filtro_status_sidebar]
+    if filtro_sidebar != "TODOS":
+        df = df[df["Status"] == filtro_sidebar]
 
+    # Controle dos botões
     if "filtro_status" not in st.session_state:
         st.session_state["filtro_status"] = "TODOS"
 
@@ -98,30 +118,32 @@ if arquivo is not None:
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        if st.button(f"TODOS ({total_itens})", use_container_width=True):
+        if st.button("TODOS: " + str(total_itens), use_container_width=True):
             st.session_state["filtro_status"] = "TODOS"
 
     with col2:
-        if st.button(f"OK ({total_ok})", use_container_width=True):
+        if st.button("OK: " + str(total_ok), use_container_width=True):
             st.session_state["filtro_status"] = "OK"
 
     with col3:
-        if st.button(f"ATENCAO ({total_atencao})", use_container_width=True):
+        if st.button("ATENCAO: " + str(total_atencao), use_container_width=True):
             st.session_state["filtro_status"] = "ATENCAO"
 
     with col4:
-        if st.button(f"RISCO ({total_risco})", use_container_width=True):
+        if st.button("RISCO: " + str(total_risco), use_container_width=True):
             st.session_state["filtro_status"] = "RISCO"
 
     with col5:
-        if st.button(f"FALTA ({total_falta})", use_container_width=True):
+        if st.button("FALTA: " + str(total_falta), use_container_width=True):
             st.session_state["filtro_status"] = "FALTA"
 
+    # Aplicar filtro dos botões
     if st.session_state["filtro_status"] != "TODOS":
         df_filtrado = df[df["Status"] == st.session_state["filtro_status"]]
     else:
         df_filtrado = df.copy()
 
+    # Funções de cor
     def colorir_status(valor):
         if valor == "FALTA":
             return "background-color: #ff4d4d; color: white; font-weight: bold"
@@ -166,16 +188,14 @@ if arquivo is not None:
 
     st.subheader("Tabela de Itens")
 
-    styled_df = df_filtrado.style.map(
-        colorir_status,
-        subset=["Status"]
-    ).map(
-        colorir_saldo,
-        subset=["Saldo Almox 1", "Saldo Total"]
+    tabela_estilizada = (
+        df_filtrado.style
+        .applymap(colorir_status, subset=["Status"])
+        .applymap(colorir_saldo, subset=["Saldo Almox 1", "Saldo Total"])
     )
 
     st.dataframe(
-        styled_df,
+        tabela_estilizada,
         use_container_width=True,
         height=600
     )
