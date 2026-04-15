@@ -363,19 +363,19 @@ with abas[4]:
     file = st.file_uploader("Excel/XLS Parâmetros", type=["xls", "xlsx"])
 
     if file:
-        from io import BytesIO
-
         conteudo = file.read()
 
         # Detecta se é HTML disfarçado de XLS (padrão Focco3i)
         try:
             texto_html = conteudo.decode("iso-8859-1")
-            if "<html" in texto_html.lower() or "<table" in texto_html.lower():
-                df = pd.read_html(BytesIO(conteudo), encoding="iso-8859-1")[0]
-                df.columns = df.columns.astype(str).str.strip()
-            else:
-                df = pd.read_excel(BytesIO(conteudo))
+            eh_html = "<html" in texto_html.lower() or "<table" in texto_html.lower()
         except Exception:
+            eh_html = False
+
+        if eh_html:
+            df = pd.read_html(BytesIO(conteudo), encoding="iso-8859-1")[0]
+            df.columns = df.columns.astype(str).str.strip()
+        else:
             df = pd.read_excel(BytesIO(conteudo))
 
         df["Data Processamento"] = agora().strftime("%d/%m/%Y")
