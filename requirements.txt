@@ -4,3 +4,6 @@ openpyxl
 xlrd
 pytz
 pdfplumber
+lxml
+beautifulsoup4
+ 
