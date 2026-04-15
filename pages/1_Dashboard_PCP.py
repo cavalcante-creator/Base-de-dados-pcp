@@ -58,6 +58,20 @@ except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
+try:
+    parametros = pd.read_csv("parametros.csv")
+    parametros = parametros.rename(columns={"COD ITEM": "Codigo", "ESTQ SEG": "Estq Seg"})
+    parametros = parametros[["Codigo", "Estq Seg"]].copy()
+    parametros["Estq Seg"] = (
+        parametros["Estq Seg"].astype(str)
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+    )
+    parametros["Estq Seg"] = pd.to_numeric(parametros["Estq Seg"], errors="coerce").fillna(0)
+    tem_parametros = True
+except:
+    tem_parametros = False
+
 saldo = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
 previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("COD")
 
@@ -88,6 +102,12 @@ df = base.merge(saldo_base,on="Codigo",how="left")
 df = df.merge(dc,on="Codigo",how="left")
 df = df.merge(op,on="Codigo",how="left")
 
+if tem_parametros:
+    df = df.merge(parametros, on="Codigo", how="left")
+    df["Estq Seg"] = df["Estq Seg"].fillna(0)
+else:
+    df["Estq Seg"] = 0
+
 df = df.fillna(0)
 
 # ========================= CÁLCULOS =========================
@@ -99,10 +119,14 @@ df["Saldo Real"] = (
     - df["Qtde Pendente OP"]
 )
 
+df["Abaixo Estq Seg"] = df["Saldo Real"] < df["Estq Seg"]
+
 # ========================= STATUS =========================
 def status(row):
     if row["Saldo Real"] < 0:
         return "FALTA"
+    if row["Abaixo Estq Seg"]:
+        return "RISCO"
     if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 3"] * 0.5:
         return "RISCO"
     return "OK"
@@ -153,6 +177,21 @@ def cor(row):
     return [""]*len(row)
 
 st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
+
+# ========================= ALERTA ESTQ SEG =========================
+if tem_parametros:
+    df_abaixo = df[df["Abaixo Estq Seg"] & (df["Status"] != "FALTA")].copy()
+    if not df_abaixo.empty:
+        with st.expander(f"⚠️ {len(df_abaixo)} item(ns) abaixo do Estoque de Segurança", expanded=True):
+            cols_alerta = ["Codigo", "Descricao", "Saldo Real", "Estq Seg", "Status"]
+            cols_alerta = [c for c in cols_alerta if c in df_abaixo.columns]
+            df_alerta = df_abaixo[cols_alerta].copy()
+            df_alerta["Diferença"] = df_alerta["Saldo Real"] - df_alerta["Estq Seg"]
+            st.dataframe(df_alerta.style.apply(cor, axis=1), use_container_width=True)
+    else:
+        st.success("✅ Todos os itens estão acima do Estoque de Segurança.")
+elif not tem_parametros:
+    st.info("ℹ️ Importe o arquivo de Parâmetros para comparar com o Estoque de Segurança.")
 
 # ========================= DOWNLOAD =========================
 st.download_button("Baixar CSV", df_filtrado.to_csv(index=False), "pcp.csv")
