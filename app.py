@@ -198,6 +198,7 @@ abas = st.tabs([
     "Perfil",
     "Ordens",
     "Previsão",
+    "Parâmetros",
     "Base de Dados"
 ])
 
@@ -357,6 +358,35 @@ with abas[3]:
         st.dataframe(df, use_container_width=True)
 
 with abas[4]:
+    st.title("Parâmetros")
+
+    file = st.file_uploader("Excel/XLS Parâmetros", type=["xls", "xlsx"])
+
+    if file:
+        from io import BytesIO
+
+        conteudo = file.read()
+
+        # Detecta se é HTML disfarçado de XLS (padrão Focco3i)
+        try:
+            texto_html = conteudo.decode("iso-8859-1")
+            if "<html" in texto_html.lower() or "<table" in texto_html.lower():
+                df = pd.read_html(BytesIO(conteudo), encoding="iso-8859-1")[0]
+                df.columns = df.columns.astype(str).str.strip()
+            else:
+                df = pd.read_excel(BytesIO(conteudo))
+        except Exception:
+            df = pd.read_excel(BytesIO(conteudo))
+
+        df["Data Processamento"] = agora().strftime("%d/%m/%Y")
+        df["Hora Processamento"] = agora().strftime("%H:%M:%S")
+
+        df.to_csv("parametros.csv", index=False)
+
+        st.success("Parâmetros carregados com sucesso.")
+        st.dataframe(df, use_container_width=True)
+
+with abas[5]:
     st.title("Base de Dados (Último Upload)")
 
     if st.button("Limpar Base de Dados"):
@@ -364,7 +394,8 @@ with abas[4]:
             "saldo.csv",
             "perfil.csv",
             "ordens.csv",
-            "previsao.csv"
+            "previsao.csv",
+            "parametros.csv"
         ]
 
         removidos = []
@@ -383,7 +414,8 @@ with abas[4]:
         "Saldo": ("saldo.csv", "Codigo"),
         "Perfil": ("perfil.csv", "Item"),
         "Ordens": ("ordens.csv", None),
-        "Previsão": ("previsao.csv", "COD")
+        "Previsão": ("previsao.csv", "COD"),
+        "Parâmetros": ("parametros.csv", "COD ITEM")
     }
 
     for nome, (arquivo, chave) in arquivos.items():
