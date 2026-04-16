@@ -373,8 +373,19 @@ with abas[4]:
             eh_html = False
 
         if eh_html:
-            df = pd.read_html(BytesIO(conteudo), encoding="iso-8859-1")[0]
+            df = pd.read_html(BytesIO(conteudo), encoding="iso-8859-1", header=0)[0]
             df.columns = df.columns.astype(str).str.strip()
+
+            # Colunas numéricas com vírgula decimal (padrão Focco3i)
+            colunas_num = ["LOTE MIN", "LOTE MAX", "LOTE MULT", "ESTQ SEG", "TEMP REP", "TEMP SEG", "AGRUP", "CONS MEDIO"]
+            for col in colunas_num:
+                if col in df.columns:
+                    df[col] = (
+                        df[col].astype(str)
+                        .str.replace(".", "", regex=False)
+                        .str.replace(",", ".", regex=False)
+                    )
+                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         else:
             df = pd.read_excel(BytesIO(conteudo))
 
