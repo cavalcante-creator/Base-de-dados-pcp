@@ -62,11 +62,6 @@ try:
     parametros = pd.read_csv("parametros.csv")
     parametros = parametros.rename(columns={"COD ITEM": "Codigo", "ESTQ SEG": "Estq Seg"})
     parametros = parametros[["Codigo", "Estq Seg"]].copy()
-    parametros["Estq Seg"] = (
-        parametros["Estq Seg"].astype(str)
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
-    )
     parametros["Estq Seg"] = pd.to_numeric(parametros["Estq Seg"], errors="coerce").fillna(0)
     tem_parametros = True
 except:
