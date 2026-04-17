@@ -95,7 +95,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 fuso = pytz.timezone("America/Sao_Paulo")
+def tratar_numero(valor):
+    if pd.isna(valor):
+        return 0
 
+    valor = str(valor).strip()
+
+    # padrão brasileiro (tem vírgula)
+    if "," in valor:
+        valor = valor.replace(".", "").replace(",", ".")
+    
+    try:
+        return float(valor)
+    except:
+        return 0
 
 def agora():
     return datetime.now(fuso)
@@ -380,12 +393,7 @@ with abas[4]:
             colunas_num = ["LOTE MIN", "LOTE MAX", "LOTE MULT", "ESTQ SEG", "TEMP REP", "TEMP SEG", "AGRUP", "CONS MEDIO"]
             for col in colunas_num:
                 if col in df.columns:
-                    df[col] = (
-                        df[col].astype(str)
-                        .str.replace(".", "", regex=False)
-                        .str.replace(",", ".", regex=False)
-                    )
-                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                    df[col] = df[col].apply(tratar_numero)
         else:
             df = pd.read_excel(BytesIO(conteudo))
 
