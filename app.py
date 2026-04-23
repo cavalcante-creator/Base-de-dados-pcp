@@ -95,6 +95,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 fuso = pytz.timezone("America/Sao_Paulo")
+
 def tratar_numero(valor):
     if pd.isna(valor):
         return 0
@@ -252,7 +253,7 @@ with abas[0]:
                         dados[codigo_atual] = {
                             "Codigo": codigo_atual,
                             "Saldo Total": 0,
-                            "Saldo Almox 3": 0
+                            "Saldo Almox 30": 0
                         }
                     continue
 
@@ -262,8 +263,8 @@ with abas[0]:
                         valor = float(nums[-1].replace(".", "").replace(",", "."))
                         dados[codigo_atual]["Saldo Total"] += valor
 
-                        if re.search(r"ALMOXARIFADO\s*:\s*3\b", linha.upper()):
-                            dados[codigo_atual]["Saldo Almox 3"] += valor
+                        if re.search(r"ALMOXARIFADO\s*:\s*30\b", linha.upper()):
+                            dados[codigo_atual]["Saldo Almox 30"] += valor
 
             df = pd.DataFrame(dados.values())
             df["Data Processamento"] = agora().strftime("%d/%m/%Y")
