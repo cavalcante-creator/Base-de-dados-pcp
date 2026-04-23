@@ -73,7 +73,7 @@ previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], 
 base = previsao[["COD","PRODUTO"]].copy()
 base.columns = ["Codigo","Descricao"]
 
-saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3"]]
+saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 30"]]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
@@ -106,10 +106,10 @@ else:
 df = df.fillna(0)
 
 # ========================= CÁLCULOS =========================
-df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+df["Saldo vs Demanda"] = df["Saldo Almox 30"] - df["Demanda Pedido"]
 
 df["Saldo Real"] = (
-    df["Saldo Almox 3"]
+    df["Saldo Almox 30"]
     - df["Demanda Pedido"]
     - df["Qtde Pendente OP"]
 )
@@ -122,7 +122,7 @@ def status(row):
         return "FALTA"
     if row["Abaixo Estq Seg"]:
         return "RISCO"
-    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 3"] * 0.5:
+    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 30"] * 0.5:
         return "RISCO"
     return "OK"
 
