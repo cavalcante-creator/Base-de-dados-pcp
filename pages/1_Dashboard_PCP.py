@@ -73,7 +73,7 @@ previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], 
 base = previsao[["COD","PRODUTO"]].copy()
 base.columns = ["Codigo","Descricao"]
 
-saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 30"]]
+saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3","Saldo Almox 30"]]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
@@ -106,15 +106,17 @@ else:
 df = df.fillna(0)
 
 # ========================= CÁLCULOS =========================
-df["Saldo vs Demanda"] = df["Saldo Almox 30"] - df["Demanda Pedido"]
+# Almox 3 → comparativo com pedidos de venda
+df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
 
 df["Saldo Real"] = (
-    df["Saldo Almox 30"]
+    df["Saldo Almox 3"]
     - df["Demanda Pedido"]
     - df["Qtde Pendente OP"]
 )
 
-df["Abaixo Estq Seg"] = df["Saldo Real"] < df["Estq Seg"]
+# Almox 30 → comparativo com estoque de segurança
+df["Abaixo Estq Seg"] = df["Saldo Almox 30"] < df["Estq Seg"]
 
 # ========================= STATUS =========================
 def status(row):
