@@ -73,7 +73,16 @@ previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], 
 base = previsao[["COD","PRODUTO"]].copy()
 base.columns = ["Codigo","Descricao"]
 
-saldo_base = saldo[["Codigo","Saldo Total","Saldo Almox 3","Saldo Almox 30"]]
+# ========================= SALDO BASE COM FALLBACK =========================
+colunas_saldo = ["Codigo", "Saldo Total", "Saldo Almox 30"]
+if "Saldo Almox 3" in saldo.columns:
+    colunas_saldo.insert(2, "Saldo Almox 3")
+else:
+    saldo["Saldo Almox 3"] = 0
+    colunas_saldo.insert(2, "Saldo Almox 3")
+    st.warning("⚠️ Coluna 'Saldo Almox 3' não encontrada. Reprocesse o PDF de Saldo. Usando 0 por enquanto.")
+
+saldo_base = saldo[colunas_saldo]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
@@ -86,9 +95,7 @@ perfil["Quantidade"] = (
 dc = perfil[perfil["Tipo"]=="DC"].groupby("Item")["Quantidade"].sum().reset_index()
 dc.columns = ["Codigo","Demanda Pedido"]
 
-# 🔥 ORDENS LIBERADAS (MAIS SEGURO)
 tipos_op = ["OP","ORDEM","LIBERADA"]
-
 op = perfil[perfil["Tipo"].isin(tipos_op)].groupby("Item")["Quantidade"].sum().reset_index()
 op.columns = ["Codigo","Qtde Pendente OP"]
 
@@ -130,7 +137,7 @@ def status(row):
 
 df["Status"] = df.apply(status, axis=1)
 
-# ========================= CARDS (FUNCIONAIS) =========================
+# ========================= CARDS =========================
 if "filtro" not in st.session_state:
     st.session_state.filtro = "TODOS"
 
@@ -138,13 +145,10 @@ c1,c2,c3,c4 = st.columns(4)
 
 if c1.button(f"TOTAL\n{len(df)}"):
     st.session_state.filtro = "TODOS"
-
 if c2.button(f"FALTA\n{(df['Status']=='FALTA').sum()}"):
     st.session_state.filtro = "FALTA"
-
 if c3.button(f"RISCO\n{(df['Status']=='RISCO').sum()}"):
     st.session_state.filtro = "RISCO"
-
 if c4.button(f"OK\n{(df['Status']=='OK').sum()}"):
     st.session_state.filtro = "OK"
 
@@ -180,10 +184,10 @@ if tem_parametros:
     df_abaixo = df[df["Abaixo Estq Seg"] & (df["Status"] != "FALTA")].copy()
     if not df_abaixo.empty:
         with st.expander(f"⚠️ {len(df_abaixo)} item(ns) abaixo do Estoque de Segurança", expanded=True):
-            cols_alerta = ["Codigo", "Descricao", "Saldo Real", "Estq Seg", "Status"]
+            cols_alerta = ["Codigo", "Descricao", "Saldo Almox 30", "Estq Seg", "Status"]
             cols_alerta = [c for c in cols_alerta if c in df_abaixo.columns]
             df_alerta = df_abaixo[cols_alerta].copy()
-            df_alerta["Diferença"] = df_alerta["Saldo Real"] - df_alerta["Estq Seg"]
+            df_alerta["Diferença"] = df_alerta["Saldo Almox 30"] - df_alerta["Estq Seg"]
             st.dataframe(df_alerta.style.apply(cor, axis=1), use_container_width=True)
     else:
         st.success("✅ Todos os itens estão acima do Estoque de Segurança.")
