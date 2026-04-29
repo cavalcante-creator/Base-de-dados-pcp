@@ -21,12 +21,10 @@ st.markdown("""
     color: white;
     font-weight: 600;
 }
-
 .total {background:#1d4ed8;}
 .falta {background:#dc2626;}
 .risco {background:#f59e0b;}
 .ok {background:#16a34a;}
-
 button[kind="secondary"] {
     width: 100%;
     border-radius: 14px;
@@ -58,6 +56,50 @@ except:
     st.warning("Faça upload dos dados primeiro.")
     st.stop()
 
+# ========================= ORDENS EM ABERTO =========================
+tem_ordens = False
+ordens_abertas = pd.DataFrame()
+
+try:
+    ordens_raw = pd.read_csv("ordens.csv")
+    colunas_upper = {c: c.upper().strip() for c in ordens_raw.columns}
+    col_cod_ordens = None
+    col_qtd_ordens = None
+    col_status_ordens = None
+
+    for orig, upper in colunas_upper.items():
+        if any(k in upper for k in ["COD", "ITEM", "PRODUTO", "CODIGO", "CÓDIGO"]) and col_cod_ordens is None:
+            col_cod_ordens = orig
+        if any(k in upper for k in ["QTDE", "QTD", "QUANTIDADE", "SALDO", "SALDO ORDEM"]) and col_qtd_ordens is None:
+            col_qtd_ordens = orig
+        if any(k in upper for k in ["STATUS", "SITUAÇÃO", "SITUACAO", "SIT"]) and col_status_ordens is None:
+            col_status_ordens = orig
+
+    if col_cod_ordens and col_qtd_ordens:
+        cols = [col_cod_ordens, col_qtd_ordens] + ([col_status_ordens] if col_status_ordens else [])
+        df_ord = ordens_raw[cols].copy()
+        df_ord.columns = ["Codigo", "Qtde Ordem"] + (["Status Ordem"] if col_status_ordens else [])
+
+        if "Status Ordem" in df_ord.columns:
+            palavras_aberto = ["ABERTO", "ABERTA", "EM ABERTO", "LIBERADA", "LIBERADO", "PENDENTE", "A PRODUZIR"]
+            mask_aberto = df_ord["Status Ordem"].astype(str).str.upper().str.strip().isin(palavras_aberto)
+            if mask_aberto.sum() > 0:
+                df_ord = df_ord[mask_aberto]
+
+        df_ord["Qtde Ordem"] = (
+            df_ord["Qtde Ordem"].astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace(",", ".", regex=False)
+        )
+        df_ord["Qtde Ordem"] = pd.to_numeric(df_ord["Qtde Ordem"], errors="coerce").fillna(0)
+        ordens_abertas = df_ord.groupby("Codigo")["Qtde Ordem"].sum().reset_index()
+        ordens_abertas.columns = ["Codigo", "Qtde Ordens Abertas"]
+        tem_ordens = True
+    else:
+        st.info("ℹ️ Arquivo de Ordens carregado, mas não foi possível identificar colunas de código/quantidade automaticamente.")
+except:
+    pass
+
 try:
     parametros = pd.read_csv("parametros.csv")
     parametros = parametros.rename(columns={"COD ITEM": "Codigo", "ESTQ SEG": "Estq Seg"})
@@ -73,21 +115,28 @@ previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], 
 base = previsao[["COD","PRODUTO"]].copy()
 base.columns = ["Codigo","Descricao"]
 
-# ========================= SALDO BASE COM FALLBACK =========================
-colunas_saldo = ["Codigo", "Saldo Total", "Saldo Almox 30"]
-if "Saldo Almox 3" in saldo.columns:
-    colunas_saldo.insert(2, "Saldo Almox 3")
-else:
-    saldo["Saldo Almox 3"] = 0
-    colunas_saldo.insert(2, "Saldo Almox 3")
-    st.warning("⚠️ Coluna 'Saldo Almox 3' não encontrada. Reprocesse o PDF de Saldo. Usando 0 por enquanto.")
+# ========================= DETECTAR ALMOXARIFADOS DISPONÍVEIS =========================
+colunas_almox = [c for c in saldo.columns if "SALDO" in c.upper() and "ALMOX" in c.upper()]
 
-saldo_base = saldo[colunas_saldo]
+if "Saldo Total" in saldo.columns:
+    opcoes_almox = ["Saldo Total"] + colunas_almox
+else:
+    opcoes_almox = colunas_almox
+
+if not opcoes_almox:
+    st.error("Nenhuma coluna de saldo encontrada. Reprocesse o PDF de Saldo.")
+    st.stop()
+
+for col in opcoes_almox:
+    if col not in saldo.columns:
+        saldo[col] = 0
+
+saldo_base = saldo[["Codigo"] + opcoes_almox]
 
 perfil["Quantidade"] = (
     perfil["Quantidade"].astype(str)
-    .str.replace(".","",regex=False)
-    .str.replace(",",".",regex=False)
+    .str.replace(".", "", regex=False)
+    .str.replace(",", ".", regex=False)
     .astype(float)
 )
 
@@ -100,9 +149,12 @@ op = perfil[perfil["Tipo"].isin(tipos_op)].groupby("Item")["Quantidade"].sum().r
 op.columns = ["Codigo","Qtde Pendente OP"]
 
 # ========================= MERGE =========================
-df = base.merge(saldo_base,on="Codigo",how="left")
-df = df.merge(dc,on="Codigo",how="left")
-df = df.merge(op,on="Codigo",how="left")
+df = base.merge(saldo_base, on="Codigo", how="left")
+df = df.merge(dc, on="Codigo", how="left")
+df = df.merge(op, on="Codigo", how="left")
+
+if tem_ordens:
+    df = df.merge(ordens_abertas, on="Codigo", how="left")
 
 if tem_parametros:
     df = df.merge(parametros, on="Codigo", how="left")
@@ -112,18 +164,51 @@ else:
 
 df = df.fillna(0)
 
+# ========================= CONFIGURAÇÕES DE ALMOXARIFADO =========================
+st.markdown("### ⚙️ Configuração dos Almoxarifados")
+
+col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+
+with col_cfg1:
+    idx_demanda = opcoes_almox.index("Saldo Almox 3") if "Saldo Almox 3" in opcoes_almox else 0
+    almox_demanda = st.selectbox(
+        "Almox para **Demanda / Pedidos**",
+        options=opcoes_almox,
+        index=idx_demanda,
+        help="Saldo deste almoxarifado será comparado com a demanda de pedidos"
+    )
+
+with col_cfg2:
+    idx_seg = opcoes_almox.index("Saldo Almox 30") if "Saldo Almox 30" in opcoes_almox else min(1, len(opcoes_almox)-1)
+    almox_estq_seg = st.selectbox(
+        "Almox para **Estoque de Segurança**",
+        options=opcoes_almox,
+        index=idx_seg,
+        help="Saldo deste almoxarifado será comparado com o estoque de segurança dos parâmetros"
+    )
+
+with col_cfg3:
+    if tem_ordens:
+        considerar_ordens = st.checkbox(
+            "📋 Incluir Ordens em Aberto no Saldo Real",
+            value=True,
+            help="Soma as ordens de produção em aberto ao saldo disponível no cálculo do Saldo Real"
+        )
+    else:
+        st.info("ℹ️ Ordens não carregadas")
+        considerar_ordens = False
+
+st.divider()
+
 # ========================= CÁLCULOS =========================
-# Almox 3 → comparativo com pedidos de venda
-df["Saldo vs Demanda"] = df["Saldo Almox 3"] - df["Demanda Pedido"]
+df["Saldo vs Demanda"] = df[almox_demanda] - df["Demanda Pedido"]
 
-df["Saldo Real"] = (
-    df["Saldo Almox 3"]
-    - df["Demanda Pedido"]
-    - df["Qtde Pendente OP"]
-)
+saldo_real = df[almox_demanda].copy()
+if considerar_ordens and tem_ordens:
+    saldo_real = saldo_real + df["Qtde Ordens Abertas"]
 
-# Almox 30 → comparativo com estoque de segurança
-df["Abaixo Estq Seg"] = df["Saldo Almox 30"] < df["Estq Seg"]
+df["Saldo Real"] = saldo_real - df["Demanda Pedido"] - df["Qtde Pendente OP"]
+df["Abaixo Estq Seg"] = df[almox_estq_seg] < df["Estq Seg"]
 
 # ========================= STATUS =========================
 def status(row):
@@ -131,7 +216,7 @@ def status(row):
         return "FALTA"
     if row["Abaixo Estq Seg"]:
         return "RISCO"
-    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row["Saldo Almox 30"] * 0.5:
+    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row[almox_estq_seg] * 0.5:
         return "RISCO"
     return "OK"
 
@@ -152,6 +237,11 @@ if c3.button(f"RISCO\n{(df['Status']=='RISCO').sum()}"):
 if c4.button(f"OK\n{(df['Status']=='OK').sum()}"):
     st.session_state.filtro = "OK"
 
+# ========================= LEGENDA =========================
+col_leg1, col_leg2 = st.columns(2)
+col_leg1.caption(f"📦 Demanda/Pedidos usando: `{almox_demanda}`")
+col_leg2.caption(f"🔒 Estq. Segurança usando: `{almox_estq_seg}`" + (" + 📋 Ordens em Aberto" if considerar_ordens and tem_ordens else ""))
+
 # ========================= FILTRO =========================
 if st.session_state.filtro == "TODOS":
     df_filtrado = df.copy()
@@ -160,12 +250,24 @@ else:
 
 # ========================= BUSCA =========================
 busca = st.text_input("Buscar")
-
 if busca:
     df_filtrado = df_filtrado[
         df_filtrado["Codigo"].astype(str).str.contains(busca, case=False) |
         df_filtrado["Descricao"].astype(str).str.contains(busca, case=False)
     ]
+
+# ========================= COLUNAS EXIBIDAS =========================
+colunas_exibir = ["Codigo", "Descricao", almox_demanda]
+if almox_estq_seg != almox_demanda:
+    colunas_exibir.append(almox_estq_seg)
+colunas_exibir += ["Demanda Pedido", "Qtde Pendente OP"]
+if tem_ordens:
+    colunas_exibir.append("Qtde Ordens Abertas")
+colunas_exibir += ["Saldo vs Demanda", "Saldo Real"]
+if tem_parametros:
+    colunas_exibir.append("Estq Seg")
+colunas_exibir.append("Status")
+colunas_exibir = [c for c in colunas_exibir if c in df_filtrado.columns]
 
 # ========================= COR NA LINHA =========================
 def cor(row):
@@ -177,22 +279,22 @@ def cor(row):
         return ["background-color:#bbf7d0"]*len(row)
     return [""]*len(row)
 
-st.dataframe(df_filtrado.style.apply(cor, axis=1), use_container_width=True)
+st.dataframe(df_filtrado[colunas_exibir].style.apply(cor, axis=1), use_container_width=True)
 
 # ========================= ALERTA ESTQ SEG =========================
 if tem_parametros:
     df_abaixo = df[df["Abaixo Estq Seg"] & (df["Status"] != "FALTA")].copy()
     if not df_abaixo.empty:
-        with st.expander(f"⚠️ {len(df_abaixo)} item(ns) abaixo do Estoque de Segurança", expanded=True):
-            cols_alerta = ["Codigo", "Descricao", "Saldo Almox 30", "Estq Seg", "Status"]
+        with st.expander(f"⚠️ {len(df_abaixo)} item(ns) abaixo do Estoque de Segurança ({almox_estq_seg})", expanded=True):
+            cols_alerta = ["Codigo", "Descricao", almox_estq_seg, "Estq Seg", "Status"]
             cols_alerta = [c for c in cols_alerta if c in df_abaixo.columns]
             df_alerta = df_abaixo[cols_alerta].copy()
-            df_alerta["Diferença"] = df_alerta["Saldo Almox 30"] - df_alerta["Estq Seg"]
+            df_alerta["Diferença"] = df_alerta[almox_estq_seg] - df_alerta["Estq Seg"]
             st.dataframe(df_alerta.style.apply(cor, axis=1), use_container_width=True)
     else:
         st.success("✅ Todos os itens estão acima do Estoque de Segurança.")
-elif not tem_parametros:
+else:
     st.info("ℹ️ Importe o arquivo de Parâmetros para comparar com o Estoque de Segurança.")
 
 # ========================= DOWNLOAD =========================
-st.download_button("Baixar CSV", df_filtrado.to_csv(index=False), "pcp.csv")
+st.download_button("Baixar CSV", df_filtrado[colunas_exibir].to_csv(index=False), "pcp.csv")
