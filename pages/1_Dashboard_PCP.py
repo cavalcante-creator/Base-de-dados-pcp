@@ -1,1128 +1,662 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Monitoramento PCP</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+import re
+from datetime import datetime
+from io import BytesIO
+
+import pandas as pd
+import pytz
+import streamlit as st
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+st.set_page_config(page_title="Monitoramento PCP", layout="wide")
+
+st.markdown("""
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI',Tahoma,sans-serif;font-size:11px;background:#d4d8dc;color:#1a1a2e;min-height:100vh}
+@import url('https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;600;700;800&display=swap');
+*, *::before, *::after { box-sizing: border-box; }
+html, body, [class*="css"] { font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 11px; }
+.main { background: #d4d8dc; }
+.block-container { padding-top: 0.5rem !important; padding-bottom: 1rem !important; max-width: 100% !important; }
 
-  /* ---- HEADER ---- */
-  .header{background:#c8ccce;border:1px solid #999;border-bottom:2px solid #888;padding:6px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-  .logo{font-size:22px;font-weight:900;color:#c0392b;font-style:italic;letter-spacing:-1px}
-  .header-title{font-size:15px;font-weight:700;color:#111;text-align:center;flex:1}
-  .date-section{text-align:right;min-width:120px}
-  .date-label{font-size:9px;color:#555;margin-bottom:2px;border-bottom:1px solid #aaa;padding-bottom:1px}
-  .date-val{font-size:11px;font-weight:700;color:#1a1a2e;padding:2px 0}
+/* HEADER */
+.pcp-header { background: #c8ccce; border: 1px solid #999; border-bottom: 2px solid #888; padding: 6px 14px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.pcp-logo { font-size: 22px; font-weight: 900; color: #c0392b; font-style: italic; letter-spacing: -1px; }
+.pcp-title { font-size: 15px; font-weight: 700; color: #111; text-align: center; flex: 1; }
+.pcp-date-section { text-align: right; min-width: 120px; }
+.pcp-date-label { font-size: 9px; color: #555; margin-bottom: 2px; border-bottom: 1px solid #aaa; padding-bottom: 1px; }
+.pcp-date-val { font-size: 11px; font-weight: 700; color: #1a1a2e; padding: 2px 0; }
 
-  /* ---- LAYOUT ---- */
-  .dash{padding:6px}
-  .row{display:flex;gap:6px;margin-bottom:6px}
-  .col{display:flex;flex-direction:column;gap:6px}
+/* PANELS */
+.panel { background: #e8eaec; border: 1px solid #aaa; overflow: hidden; margin-bottom: 6px; }
+.panel-header { background: #c0c4c6; border-bottom: 1px solid #999; padding: 3px 8px; font-size: 10px; font-weight: 700; color: #111; text-align: center; letter-spacing: .3px; }
 
-  /* ---- PANELS ---- */
-  .panel{background:#e8eaec;border:1px solid #aaa;overflow:hidden}
-  .panel-header{background:#c0c4c6;border-bottom:1px solid #999;padding:3px 8px;font-size:10px;font-weight:700;color:#111;text-align:center;letter-spacing:.3px}
+/* STATUS CARDS */
+.status-cards { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; padding: 6px; }
+.scard { padding: 6px 8px; border-radius: 3px; cursor: pointer; border: 1px solid rgba(0,0,0,.1); }
+.scard-total { background: #1a3a5c; color: white; }
+.scard-falta { background: #c0392b; color: white; }
+.scard-risco { background: #d68910; color: white; }
+.scard-ok    { background: #1e8449; color: white; }
+.scard-lbl { font-size: 9px; font-weight: 600; opacity: .85; text-transform: uppercase; letter-spacing: .5px; }
+.scard-num { font-size: 24px; font-weight: 800; line-height: 1; }
+.scard-sub { font-size: 8px; opacity: .75; margin-top: 1px; }
 
-  /* ---- TABELAS ---- */
-  .tbl-wrap{overflow:auto;max-height:200px}
-  table{width:100%;border-collapse:collapse;font-size:9.5px}
-  th{background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;white-space:nowrap;position:sticky;top:0;z-index:1;text-align:left}
-  td{border:1px solid #ccc;padding:2px 5px;vertical-align:middle;white-space:nowrap}
-  tr:nth-child(even) td{background:#dfe2e5}
-  tr:hover td{background:#cdd0d3}
+/* BADGES */
+.badge { display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; border-radius: 2px; font-size: 9px; font-weight: 700; }
+.badge-ok    { background: #c6efce; color: #1e6b2e; border: 1px solid #9dc09d; }
+.badge-risco { background: #ffeb9c; color: #7a5000; border: 1px solid #d4b800; }
+.badge-falta { background: #ffc7ce; color: #9c0006; border: 1px solid #e0808a; }
 
-  /* ---- STATUS BADGES ---- */
-  .badge{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:2px;font-size:9px;font-weight:700}
-  .badge-ok{background:#c6efce;color:#1e6b2e;border:1px solid #9dc09d}
-  .badge-risco{background:#ffeb9c;color:#7a5000;border:1px solid #d4b800}
-  .badge-falta{background:#ffc7ce;color:#9c0006;border:1px solid #e0808a}
+/* TABLES */
+div[data-testid="stDataFrame"] { background: #e8eaec !important; border: 1px solid #aaa !important; border-radius: 0 !important; box-shadow: none !important; font-size: 9.5px !important; }
 
-  /* ---- LINHA COLORIDA ---- */
-  .row-falta td{background:#ffc7ce !important}
-  .row-risco td{background:#ffeb9c !important}
-  .row-ok td{background:#f0fff4}
+/* FILTER BAR */
+.filter-info { display: flex; gap: 6px; padding: 5px 6px; align-items: center; background: #dde0e3; border-bottom: 1px solid #bbb; font-size: 10px; }
 
-  /* ---- SALDO X PEDIDOS ---- */
-  .saldo-panel{background:#e8eaec;border:1px solid #aaa}
-  .legend-row{display:flex;align-items:center;gap:5px;padding:2px 6px;font-size:9.5px}
-  .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.2)}
-  .dot-red{background:#e74c3c}
-  .dot-yellow{background:#e6a817}
-  .dot-green{background:#27ae60}
-  .saldo-subtitle{font-size:8.5px;color:#555;padding:2px 6px 3px;border-top:1px solid #ccc;margin-top:2px}
+/* METRICS */
+.metric-row { display: flex; gap: 8px; padding: 5px 6px; background: #dde0e3; border-bottom: 1px solid #ccc; margin-bottom: 4px; }
+.metric-box { background: #cdd0d3; border: 1px solid #bbb; border-radius: 2px; padding: 4px 8px; min-width: 80px; }
+.metric-lbl { font-size: 9px; color: #555; font-weight: 700; }
+.metric-val { font-size: 14px; font-weight: 800; color: #1a1a2e; }
 
-  /* ---- MINI CHART ---- */
-  .chart-area{padding:4px 6px 0;display:flex;align-items:flex-end;gap:2px;height:76px;border-bottom:1px solid #bbb}
-  .bar-grp{display:flex;flex-direction:column;align-items:center;flex:1}
-  .bars{display:flex;align-items:flex-end;gap:1px;height:68px}
-  .bar{border-radius:1px 1px 0 0;min-width:5px}
-  .bar-lbl{font-size:7px;color:#666;text-align:center;margin-top:2px;transform:rotate(-40deg);transform-origin:top center;width:18px;overflow:hidden}
-  .chart-btns{display:flex;justify-content:center;gap:10px;padding:4px 0}
-  .cbtn{width:13px;height:13px;border-radius:50%;border:2px solid rgba(0,0,0,.3);cursor:pointer}
+/* BUTTONS */
+div.stButton > button { border-radius: 2px !important; font-weight: 600 !important; font-size: 10px !important; border: 1px solid #999 !important; background: #d0d4d8 !important; color: #222 !important; transition: all .1s !important; padding: 4px 10px !important; }
+div.stButton > button:hover { background: #bbbfc3 !important; border-color: #777 !important; }
+div.stButton > button[kind="primary"] { background: #1a3a5c !important; color: white !important; border-color: #0d2740 !important; }
 
-  /* ---- UPLOAD ÁREA ---- */
-  .upload-section{padding:8px}
-  .upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-  .upload-box{background:#dde0e3;border:1.5px dashed #999;border-radius:4px;padding:8px;text-align:center;cursor:pointer;transition:.15s}
-  .upload-box:hover{border-color:#555;background:#d0d4d8}
-  .upload-box.loaded{border-color:#27ae60;background:#e8f5e9}
-  .upload-box.loaded .up-icon{color:#27ae60}
-  .up-icon{font-size:18px;color:#888;margin-bottom:3px}
-  .up-label{font-size:10px;font-weight:700;color:#333;margin-bottom:2px}
-  .up-sub{font-size:8.5px;color:#666}
-  input[type=file]{display:none}
+/* NAV TABS */
+div[data-baseweb="tab-list"] { background: #c8ccce; border-bottom: 2px solid #999; gap: 2px; }
+div[data-baseweb="tab"] { background: #c8ccce; border: 1px solid #999; border-bottom: none; border-radius: 2px 2px 0 0; font-size: 10px; font-weight: 600; color: #555; padding: 4px 12px; }
+div[aria-selected="true"][data-baseweb="tab"] { background: #e8eaec; color: #111; border-bottom: 2px solid #e8eaec; }
 
-  /* ---- BOTÕES ---- */
-  .btn{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid #999;background:#d0d4d8;cursor:pointer;font-size:10px;font-weight:600;color:#222;border-radius:2px;transition:.1s}
-  .btn:hover{background:#bbbfc3;border-color:#777}
-  .btn-primary{background:#1a3a5c;color:white;border-color:#0d2740}
-  .btn-primary:hover{background:#0d2740}
-  .btn-danger{background:#c0392b;color:white;border-color:#922b21}
-  .btn-sm{padding:2px 7px;font-size:9px}
+/* SELECTS / INPUTS */
+div[data-baseweb="select"] > div { border-radius: 2px !important; border: 1px solid #aaa !important; background: #f0f2f4 !important; font-size: 10px !important; }
+div.stTextInput > div > input { border-radius: 2px !important; border: 1px solid #aaa !important; background: #f0f2f4 !important; font-size: 10px !important; }
 
-  /* ---- ABAS NAV ---- */
-  .nav-tabs{display:flex;gap:0;border-bottom:2px solid #999;margin-bottom:6px}
-  .ntab{padding:4px 12px;background:#c8ccce;border:1px solid #999;border-bottom:none;cursor:pointer;font-size:10px;font-weight:600;color:#555;margin-right:2px;border-radius:2px 2px 0 0}
-  .ntab.active{background:#e8eaec;color:#111;border-bottom:2px solid #e8eaec;margin-bottom:-2px}
-  .ntab:hover:not(.active){background:#bbbfc3}
+/* INFO PILLS */
+.info-pill { display: inline-flex; align-items: center; gap: 6px; background: #dde0e3; border: 1px solid #bbb; border-radius: 2px; padding: 2px 8px; font-size: 10px; color: #333; font-weight: 600; margin-right: 4px; margin-bottom: 4px; }
 
-  /* ---- CARDS STATUS ---- */
-  .status-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;padding:6px}
-  .scard{padding:6px 8px;border-radius:3px;cursor:pointer;border:1px solid rgba(0,0,0,.1)}
-  .scard-total{background:#1a3a5c;color:white}
-  .scard-falta{background:#c0392b;color:white}
-  .scard-risco{background:#d68910;color:white}
-  .scard-ok{background:#1e8449;color:white}
-  .scard-lbl{font-size:9px;font-weight:600;opacity:.85;text-transform:uppercase;letter-spacing:.5px}
-  .scard-num{font-size:24px;font-weight:800;line-height:1}
-  .scard-sub{font-size:8px;opacity:.75;margin-top:1px}
+/* SUGESTAO ITEMS */
+.sug-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; border-bottom: 1px solid #ccc; font-size: 9.5px; background: #e8eaec; }
+.sug-item-falta { border-left: 3px solid #c0392b; }
+.sug-item-risco { border-left: 3px solid #d68910; }
+.sug-cod { font-weight: 700; color: #111; }
+.sug-qtd { font-weight: 700; color: #1a3a5c; background: rgba(0,0,0,.08); border-radius: 2px; padding: 2px 6px; }
 
-  /* ---- FILTROS ---- */
-  .filter-bar{display:flex;gap:6px;padding:5px 6px;align-items:center;background:#dde0e3;border-bottom:1px solid #bbb;flex-wrap:wrap}
-  .filter-bar input[type=text]{flex:1;min-width:120px;padding:3px 7px;border:1px solid #aaa;background:#f0f2f4;font-size:10px;border-radius:2px}
-  .filter-bar select{padding:3px 6px;border:1px solid #aaa;background:#f0f2f4;font-size:10px;border-radius:2px}
-  .filter-bar label{font-size:10px;font-weight:700;white-space:nowrap;display:flex;align-items:center;gap:4px}
+/* MSG */
+.msg-warn { background: #fff3cd; border: 1px solid #e6a817; color: #7a5000; padding: 6px 10px; font-size: 10px; border-radius: 2px; margin: 4px 0; }
+.msg-ok   { background: #d4edda; border: 1px solid #7dbb8e; color: #155724; padding: 6px 10px; font-size: 10px; border-radius: 2px; margin: 4px 0; }
+.msg-info { background: #d0e8f8; border: 1px solid #7ab3d4; color: #0c4a6e; padding: 6px 10px; font-size: 10px; border-radius: 2px; margin: 4px 0; }
 
-  /* ---- MSG ---- */
-  .msg-info{background:#d0e8f8;border:1px solid #7ab3d4;color:#0c4a6e;padding:6px 10px;font-size:10px;border-radius:2px;margin:6px}
-  .msg-warn{background:#fff3cd;border:1px solid #e6a817;color:#7a5000;padding:6px 10px;font-size:10px;border-radius:2px;margin:6px}
-  .msg-ok{background:#d4edda;border:1px solid #7dbb8e;color:#155724;padding:6px 10px;font-size:10px;border-radius:2px;margin:6px}
-
-  /* ---- METRICS BAR ---- */
-  .metrics-bar{display:flex;gap:8px;padding:5px 6px;background:#dde0e3;border-bottom:1px solid #ccc;flex-wrap:wrap}
-  .metric-chip{background:#cdd0d3;border:1px solid #bbb;border-radius:2px;padding:4px 8px;min-width:80px}
-  .metric-chip-lbl{font-size:9px;color:#555;font-weight:700}
-  .metric-chip-val{font-size:14px;font-weight:800;color:#1a1a2e}
-
-  /* ---- DOWNLOAD BAR ---- */
-  .dl-bar{display:flex;gap:5px;padding:5px 6px;border-top:1px solid #ccc;background:#dde0e3}
-
-  /* ---- SUGESTÃO BOX ---- */
-  .sug-urgente{border-left:3px solid #c0392b}
-  .sug-atencao{border-left:3px solid #d68910}
-
-  /* ---- SCROLLBAR ---- */
-  ::-webkit-scrollbar{width:6px;height:6px}
-  ::-webkit-scrollbar-track{background:#d0d4d8}
-  ::-webkit-scrollbar-thumb{background:#999;border-radius:3px}
-  ::-webkit-scrollbar-thumb:hover{background:#666}
-
-  .hidden{display:none}
-  .flex-center{display:flex;align-items:center;justify-content:center;padding:20px;color:#777;font-size:11px}
-
-  /* ---- SALDOS específico ---- */
-  .saldo-cfg{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px}
-  .saldo-metrics{display:flex;gap:8px;padding:5px 6px;background:#dde0e3;border-bottom:1px solid #ccc}
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #d0d4d8; }
+::-webkit-scrollbar-thumb { background: #999; border-radius: 3px; }
 </style>
-</head>
-<body>
-<div class="dash">
+""", unsafe_allow_html=True)
 
-  <!-- HEADER -->
-  <div class="header">
-    <div class="logo">Colafix</div>
-    <div class="header-title">Monitoramento PCP</div>
-    <div class="date-section">
-      <div class="date-label">Data Relatório ▼</div>
-      <div class="date-val" id="dataAtual"></div>
+fuso = pytz.timezone("America/Sao_Paulo")
+
+def agora():
+    return datetime.now(fuso)
+
+def exportar_excel_formatado(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Dados")
+        ws = writer.book["Dados"]
+        header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
+        header_font = Font(color="FFFFFF", bold=True)
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        for idx, coluna in enumerate(df.columns, start=1):
+            letra = get_column_letter(idx)
+            ws.column_dimensions[letra].width = min(
+                max(len(str(coluna)) + 4,
+                    max((len(str(v)) for v in df[coluna] if pd.notna(v)), default=4) + 2), 40)
+        if "Status" in df.columns:
+            idx_s = list(df.columns).index("Status") + 1
+            for cell in ws[get_column_letter(idx_s)][1:]:
+                v = str(cell.value or "")
+                if "FALTA" in v:  cell.fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+                elif "RISCO" in v: cell.fill = PatternFill(fill_type="solid", fgColor="FFF2CC")
+                elif "OK" in v:   cell.fill = PatternFill(fill_type="solid", fgColor="C6E0B4")
+    output.seek(0)
+    return output.getvalue()
+
+def badge_html(status):
+    if status == "OK":    return '<span class="badge badge-ok">✔ OK</span>'
+    if status == "RISCO": return '<span class="badge badge-risco">⚠ RISCO</span>'
+    if status == "FALTA": return '<span class="badge badge-falta">● FALTA</span>'
+    return status
+
+def metric_box(lbl, val):
+    return f'<div class="metric-box"><div class="metric-lbl">{lbl}</div><div class="metric-val">{val}</div></div>'
+
+def fmt_num(n, dec=0):
+    try:
+        return f"{float(n):,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
+        return str(n)
+
+def estilo_linha(row):
+    if row["Status"] == "FALTA": return ["background-color:#ffc7ce; color:#9c0006"] * len(row)
+    if row["Status"] == "RISCO": return ["background-color:#ffeb9c; color:#7a5000"] * len(row)
+    if row["Status"] == "OK":   return ["background-color:#f0fff4; color:#14532d"] * len(row)
+    return [""] * len(row)
+
+# ── CARREGAR DADOS ──────────────────────────────────────────
+try:
+    saldo    = pd.read_csv("saldo.csv")
+    perfil   = pd.read_csv("perfil.csv")
+    previsao = pd.read_csv("previsao.csv")
+except Exception:
+    st.markdown('<div class="msg-warn">⚠️ Faça upload dos dados na página principal primeiro.</div>', unsafe_allow_html=True)
+    st.stop()
+
+tem_ordens = False
+ordens_abertas = pd.DataFrame()
+try:
+    ordens_raw = pd.read_csv("ordens.csv")
+    colunas_upper = {c: c.upper().strip() for c in ordens_raw.columns}
+    col_cod_ordens = col_qtd_ordens = col_status_ordens = None
+    for orig, upper in colunas_upper.items():
+        if any(k in upper for k in ["COD","ITEM","PRODUTO","CODIGO","CÓDIGO"]) and col_cod_ordens is None: col_cod_ordens = orig
+        if any(k in upper for k in ["QTDE","QTD","QUANTIDADE","SALDO","SALDO ORDEM"]) and col_qtd_ordens is None: col_qtd_ordens = orig
+        if any(k in upper for k in ["STATUS","SITUAÇÃO","SITUACAO","SIT"]) and col_status_ordens is None: col_status_ordens = orig
+    if col_cod_ordens and col_qtd_ordens:
+        cols = [col_cod_ordens, col_qtd_ordens] + ([col_status_ordens] if col_status_ordens else [])
+        df_ord = ordens_raw[cols].copy()
+        df_ord.columns = ["Codigo","Qtde Ordem"] + (["Status Ordem"] if col_status_ordens else [])
+        if "Status Ordem" in df_ord.columns:
+            palavras_aberto = ["ABERTO","ABERTA","EM ABERTO","LIBERADA","LIBERADO","PENDENTE","A PRODUZIR"]
+            mask = df_ord["Status Ordem"].astype(str).str.upper().str.strip().isin(palavras_aberto)
+            if mask.sum() > 0: df_ord = df_ord[mask]
+        df_ord["Qtde Ordem"] = pd.to_numeric(
+            df_ord["Qtde Ordem"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+            errors="coerce").fillna(0)
+        ordens_abertas = df_ord.groupby("Codigo")["Qtde Ordem"].sum().reset_index()
+        ordens_abertas.columns = ["Codigo","Qtde Ordens Abertas"]
+        tem_ordens = True
+except Exception:
+    pass
+
+tem_parametros = False
+try:
+    parametros = pd.read_csv("parametros.csv")
+    parametros = parametros.rename(columns={"COD ITEM": "Codigo", "ESTQ SEG": "Estq Seg"})
+    parametros = parametros[["Codigo","Estq Seg"]].copy()
+    parametros["Estq Seg"] = pd.to_numeric(parametros["Estq Seg"], errors="coerce").fillna(0)
+    tem_parametros = True
+except Exception:
+    pass
+
+saldo    = saldo.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("Codigo")
+previsao = previsao.sort_values(by=["Data Processamento","Hora Processamento"], ascending=False).drop_duplicates("COD")
+base     = previsao[["COD","PRODUTO"]].copy()
+base.columns = ["Codigo","Descricao"]
+
+colunas_almox = [c for c in saldo.columns if "SALDO" in c.upper() and "ALMOX" in c.upper()]
+opcoes_almox  = (["Saldo Total"] if "Saldo Total" in saldo.columns else []) + colunas_almox
+if not opcoes_almox:
+    st.error("Nenhuma coluna de saldo encontrada. Reprocesse o PDF de Saldo.")
+    st.stop()
+for col in opcoes_almox:
+    if col not in saldo.columns: saldo[col] = 0
+
+saldo_base = saldo[["Codigo"] + opcoes_almox]
+perfil["Quantidade"] = pd.to_numeric(
+    perfil["Quantidade"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+    errors="coerce").fillna(0)
+
+dc = perfil[perfil["Tipo"] == "DC"].groupby("Item")["Quantidade"].sum().reset_index()
+dc.columns = ["Codigo","Demanda Pedido"]
+op = perfil[perfil["Tipo"].isin(["OP","ORDEM","LIBERADA"])].groupby("Item")["Quantidade"].sum().reset_index()
+op.columns = ["Codigo","Qtde Pendente OP"]
+
+df_full = base.merge(saldo_base, on="Codigo", how="left")
+df_full = df_full.merge(dc, on="Codigo", how="left")
+df_full = df_full.merge(op, on="Codigo", how="left")
+if tem_ordens:     df_full = df_full.merge(ordens_abertas, on="Codigo", how="left")
+if tem_parametros:
+    df_full = df_full.merge(parametros, on="Codigo", how="left")
+    df_full["Estq Seg"] = df_full["Estq Seg"].fillna(0)
+else:
+    df_full["Estq Seg"] = 0
+df_full = df_full.fillna(0)
+
+# ── HEADER ──────────────────────────────────────────────────
+now_str = agora().strftime("%d/%m/%Y %H:%M")
+st.markdown(f"""
+<div class="pcp-header">
+  <div class="pcp-logo">Colafix</div>
+  <div class="pcp-title">Monitoramento PCP</div>
+  <div class="pcp-date-section">
+    <div class="pcp-date-label">Data Relatório ▼</div>
+    <div class="pcp-date-val">{now_str}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── NAVEGAÇÃO ────────────────────────────────────────────────
+tab_upload, tab_dash, tab_filtros, tab_estoques, tab_demandas, tab_sugestao = st.tabs([
+    "⬆ Upload de Dados", "📊 Dashboard PCP", "🔍 Filtros",
+    "📦 Estoques", "📋 Demandas", "🏭 Sugestão"
+])
+
+def calc_status(row, almox_dem, almox_seg, usar_ordens):
+    saldo_real = (row[almox_dem] + (row["Qtde Ordens Abertas"] if usar_ordens and tem_ordens else 0)
+                  - row["Demanda Pedido"] - row["Qtde Pendente OP"])
+    abaixo_seg = row[almox_seg] < row["Estq Seg"]
+    if saldo_real < 0: return "FALTA"
+    if abaixo_seg:     return "RISCO"
+    if row["Demanda Pedido"] + row["Qtde Pendente OP"] >= row[almox_seg] * 0.5: return "RISCO"
+    return "OK"
+
+# ══════════════════════════════════════════════════════════════
+# ABA UPLOAD
+# ══════════════════════════════════════════════════════════════
+with tab_upload:
+    st.markdown('<div class="panel"><div class="panel-header">Upload e Processamento de Dados</div>', unsafe_allow_html=True)
+    st.markdown('<div class="msg-info">ℹ️ Os dados são carregados automaticamente a partir dos arquivos CSV/Excel salvos pelo sistema principal (app.py). Esta aba é apenas informativa.</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("**📄 Saldo**")
+        st.success(f"✅ {len(saldo)} itens carregados" if len(saldo) > 0 else "❌ Não carregado")
+    with col2:
+        st.markdown("**📋 Perfil**")
+        st.success(f"✅ {len(perfil)} registros carregados" if len(perfil) > 0 else "❌ Não carregado")
+    with col3:
+        st.markdown("**📈 Previsão**")
+        st.success(f"✅ {len(previsao)} itens carregados" if len(previsao) > 0 else "❌ Não carregado")
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        st.markdown("**🏭 Ordens**")
+        if tem_ordens: st.success(f"✅ {len(ordens_abertas)} ordens abertas")
+        else: st.warning("⚠️ Não carregado")
+    with col5:
+        st.markdown("**⚙️ Parâmetros**")
+        if tem_parametros: st.success(f"✅ {len(parametros)} itens carregados")
+        else: st.warning("⚠️ Não carregado")
+    with col6:
+        st.markdown("**📦 Base consolidada**")
+        st.info(f"🔢 {len(df_full)} itens no total")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ABA DASHBOARD
+# ══════════════════════════════════════════════════════════════
+with tab_dash:
+    almox_d_dash = opcoes_almox[0] if not any("3" in x for x in opcoes_almox) else next(x for x in opcoes_almox if "3" in x)
+    almox_s_dash = opcoes_almox[-1] if not any("30" in x for x in opcoes_almox) else next(x for x in opcoes_almox if "30" in x)
+
+    rows_dash = df_full.copy()
+    rows_dash["Status"] = rows_dash.apply(lambda r: calc_status(r, almox_d_dash, almox_s_dash, True), axis=1)
+
+    n_total = len(rows_dash)
+    n_falta = (rows_dash["Status"] == "FALTA").sum()
+    n_risco = (rows_dash["Status"] == "RISCO").sum()
+    n_ok    = (rows_dash["Status"] == "OK").sum()
+
+    # Cards resumo
+    st.markdown('<div class="panel"><div class="panel-header">Resumo de Status</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="status-cards">
+      <div class="scard scard-total"><div class="scard-lbl">📦 Total</div><div class="scard-num">{n_total}</div><div class="scard-sub">itens na base</div></div>
+      <div class="scard scard-falta"><div class="scard-lbl">🔴 Falta</div><div class="scard-num">{n_falta}</div><div class="scard-sub">produção urgente</div></div>
+      <div class="scard scard-risco"><div class="scard-lbl">🟡 Risco</div><div class="scard-num">{n_risco}</div><div class="scard-sub">abaixo est. seg.</div></div>
+      <div class="scard scard-ok">  <div class="scard-lbl">🟢 OK</div>   <div class="scard-num">{n_ok}</div>   <div class="scard-sub">dentro do esperado</div></div>
     </div>
-  </div>
+    """, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-  <!-- NAV PRINCIPAL -->
-  <div class="nav-tabs">
-    <div class="ntab active" onclick="showMain('upload')">⬆ Upload de Dados</div>
-    <div class="ntab" onclick="showMain('resumo')">📊 Resumo</div>
-    <div class="ntab" onclick="showMain('filtros')">🔍 Filtros</div>
-    <div class="ntab" onclick="showMain('saldos')">💰 Saldos</div>
-    <div class="ntab" onclick="showMain('estoques')">📦 Estoques</div>
-    <div class="ntab" onclick="showMain('demandas')">📋 Demandas</div>
-    <div class="ntab" onclick="showMain('sugestao')">🏭 Sugestão</div>
-  </div>
+    # Linha principal: Consumo | Saldo x Pedidos | Pedidos/Sugestão
+    col_main, col_right1, col_right2 = st.columns([2.4, 0.75, 0.75])
 
-  <!-- ===== ABA: UPLOAD ===== -->
-  <div id="tab-upload">
-    <div class="panel">
-      <div class="panel-header">Upload e Processamento de Dados</div>
-      <div class="upload-section">
-        <div class="upload-grid">
-          <div>
-            <div class="upload-box" id="box-saldo-csv" onclick="document.getElementById('f-saldo-csv').click()">
-              <div class="up-icon">📊</div>
-              <div class="up-label">Saldo (CSV)</div>
-              <div class="up-sub" id="sub-saldo-csv">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-saldo-csv" accept=".csv" onchange="carregarSaldoCSV(this)">
-          </div>
-          <div>
-            <div class="upload-box" id="box-perfil" onclick="document.getElementById('f-perfil').click()">
-              <div class="up-icon">📋</div>
-              <div class="up-label">Perfil (CSV)</div>
-              <div class="up-sub" id="sub-perfil">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-perfil" accept=".csv" onchange="carregarPerfil(this)">
-          </div>
-          <div>
-            <div class="upload-box" id="box-ordens" onclick="document.getElementById('f-ordens').click()">
-              <div class="up-icon">🏭</div>
-              <div class="up-label">Ordens (CSV)</div>
-              <div class="up-sub" id="sub-ordens">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-ordens" accept=".csv" onchange="carregarOrdens(this)">
-          </div>
-          <div>
-            <div class="upload-box" id="box-previsao" onclick="document.getElementById('f-previsao').click()">
-              <div class="up-icon">📈</div>
-              <div class="up-label">Previsão (Excel)</div>
-              <div class="up-sub" id="sub-previsao">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-previsao" accept=".xlsx,.xls" onchange="carregarPrevisao(this)">
-          </div>
-          <div>
-            <div class="upload-box" id="box-params" onclick="document.getElementById('f-params').click()">
-              <div class="up-icon">⚙️</div>
-              <div class="up-label">Parâmetros (Excel)</div>
-              <div class="up-sub" id="sub-params">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-params" accept=".xlsx,.xls" onchange="carregarParametros(this)">
-          </div>
-          <div>
-            <div class="upload-box" id="box-saldo-pdf" onclick="document.getElementById('f-saldo-pdf').click()">
-              <div class="up-icon">📄</div>
-              <div class="up-label">Saldo (PDF — info)</div>
-              <div class="up-sub" id="sub-saldo-pdf">Clique para selecionar</div>
-            </div>
-            <input type="file" id="f-saldo-pdf" accept=".pdf" onchange="infoSaldoPDF(this)">
-          </div>
+    with col_main:
+        st.markdown('<div class="panel"><div class="panel-header">Consumo</div>', unsafe_allow_html=True)
+        busca_c = st.text_input("Buscar código ou descrição...", key="busca_consumo_dash", placeholder="Pesquisar...")
+        filtro_st_c = st.selectbox("Filtrar status", ["Todos","FALTA","RISCO","OK"], key="filt_st_consumo_dash")
+
+        df_consumo = rows_dash.copy()
+        if busca_c:
+            df_consumo = df_consumo[
+                df_consumo["Codigo"].astype(str).str.contains(busca_c, case=False, na=False) |
+                df_consumo["Descricao"].astype(str).str.contains(busca_c, case=False, na=False)]
+        if filtro_st_c != "Todos":
+            df_consumo = df_consumo[df_consumo["Status"] == filtro_st_c]
+
+        # Montar tabela HTML compacta
+        rows_html = ""
+        for _, r in df_consumo.head(80).iterrows():
+            cls = "row-falta" if r["Status"]=="FALTA" else ("row-risco" if r["Status"]=="RISCO" else "")
+            bg  = "background:#ffc7ce" if r["Status"]=="FALTA" else ("background:#ffeb9c" if r["Status"]=="RISCO" else "background:#f0fff4")
+            badge = badge_html(r["Status"])
+            rows_html += f"""<tr style="{bg}">
+              <td><b>{r['Codigo']}</b></td>
+              <td style="text-align:right">{fmt_num(r.get('Saldo Total',0))}</td>
+              <td style="max-width:160px;white-space:normal;font-size:9px">{str(r['Descricao'])[:50]}</td>
+              <td style="text-align:right">{fmt_num(r.get(almox_d_dash,0))}</td>
+              <td style="text-align:right">{fmt_num(r['Demanda Pedido'])}</td>
+              <td>{badge}</td>
+            </tr>"""
+        st.markdown(f"""
+        <div style="overflow:auto;max-height:280px;border:1px solid #ccc">
+        <table style="width:100%;border-collapse:collapse;font-size:9.5px">
+          <thead><tr>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">Codigo</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">Saldo Total</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">Descrição</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">{almox_d_dash}</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">Demanda Pedido</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;font-weight:700;position:sticky;top:0">Status</th>
+          </tr></thead>
+          <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>'}</tbody>
+        </table></div>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_right1:
+        # Saldo x Pedidos (mini chart via barras CSS)
+        st.markdown('<div class="panel"><div class="panel-header">Saldo x Pedidos</div>', unsafe_allow_html=True)
+        sample = rows_dash.head(12)
+        max_v  = max(sample[["Saldo Total","Demanda Pedido"]].max().max(), 1)
+        bars_html = ""
+        for _, r in sample.iterrows():
+            sh = int((r.get("Saldo Total",0)/max_v)*60)
+            dh = int((r["Demanda Pedido"]/max_v)*60)
+            col_bar = "#c0392b" if r["Status"]=="FALTA" else ("#e6a817" if r["Status"]=="RISCO" else "#27ae60")
+            cod_lbl = str(r["Codigo"])[:5]
+            bars_html += f"""<div style="display:flex;flex-direction:column;align-items:center;flex:1">
+              <div style="display:flex;align-items:flex-end;gap:1px;height:60px">
+                <div style="height:{sh}px;background:{col_bar};width:6px;border-radius:1px 1px 0 0"></div>
+                <div style="height:{dh}px;background:#666;width:4px;opacity:.5;border-radius:1px 1px 0 0"></div>
+              </div>
+              <div style="font-size:7px;color:#666;transform:rotate(-40deg);transform-origin:top center;width:18px;overflow:hidden;margin-top:2px">{cod_lbl}</div>
+            </div>"""
+        st.markdown(f"""
+        <div style="font-size:9px;padding:3px 6px">
+          <span style="color:#c0392b">●</span> FALTA &nbsp;
+          <span style="color:#27ae60">●</span> OK &nbsp;
+          <span style="color:#e6a817">●</span> RISCO
         </div>
-        <div id="upload-msgs"></div>
-        <div style="display:flex;gap:6px;margin-top:8px;padding:0 2px">
-          <button class="btn btn-primary" onclick="gerarDashboard()">▶ Gerar Dashboard</button>
-          <button class="btn btn-danger" onclick="limparBase()">🗑 Limpar Base</button>
+        <div style="display:flex;align-items:flex-end;gap:2px;height:76px;padding:4px 6px 0;border-bottom:1px solid #bbb">
+          {bars_html}
         </div>
-        <div id="base-preview" style="margin-top:8px"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: RESUMO ===== -->
-  <div id="tab-resumo" class="hidden">
-    <div class="panel" style="margin-bottom:6px">
-      <div class="panel-header">⚙️ Configurar Almoxarifados</div>
-      <div class="filter-bar">
-        <label>Almox — Demanda/Pedidos:</label>
-        <select id="res-almox-dem" onchange="renderResumo()"></select>
-        <label>Almox — Estoque de Segurança:</label>
-        <select id="res-almox-seg" onchange="renderResumo()"></select>
-        <label><input type="checkbox" id="res-ordens" onchange="renderResumo()" checked> Incluir Ordens Abertas</label>
-      </div>
-    </div>
-    <div class="panel" style="margin-bottom:6px">
-      <div class="panel-header">Resumo de Status</div>
-      <div class="status-cards" id="statusCards"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">Visão Geral — clique nos cards para filtrar por status</div>
-      <div class="tbl-wrap" style="max-height:380px">
-        <table>
-          <thead><tr><th>Codigo</th><th>Descrição</th><th id="res-col-almox">Saldo</th><th>Demanda Pedido</th><th>Saldo Real</th><th>Status</th></tr></thead>
-          <tbody id="resumoBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('resumo')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('resumo')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: FILTROS ===== -->
-  <div id="tab-filtros" class="hidden">
-    <div class="panel">
-      <div class="panel-header">Filtros e Análise Geral</div>
-      <div class="filter-bar">
-        <label>Almox Demanda:</label>
-        <select id="flt-almox-dem" onchange="renderFiltros()"></select>
-        <label>Almox Est.Seg:</label>
-        <select id="flt-almox-seg" onchange="renderFiltros()"></select>
-        <label><input type="checkbox" id="flt-ordens" onchange="renderFiltros()" checked> Incluir Ordens Abertas</label>
-        <input type="text" id="busca-flt" placeholder="Pesquisar código/descrição..." oninput="renderFiltros()">
-        <select id="flt-status" onchange="renderFiltros()">
-          <option value="">Todos</option>
-          <option value="FALTA">FALTA</option>
-          <option value="RISCO">RISCO</option>
-          <option value="OK">OK</option>
-        </select>
-        <select id="flt-ocultar" multiple style="max-height:40px;min-width:120px;font-size:9px" title="Ctrl+clique para ocultar itens">
-        </select>
-        <button class="btn btn-sm" onclick="aplicarOcultar()">Ocultar sel.</button>
-        <button class="btn btn-sm" onclick="limparOcultar()">Limpar ocultos</button>
-      </div>
-      <div class="metrics-bar" id="flt-metrics"></div>
-      <div class="tbl-wrap" style="max-height:420px">
-        <table>
-          <thead>
-            <tr>
-              <th>Codigo</th><th>Descrição</th><th id="flt-col-almox-d">Saldo Almox</th><th id="flt-col-almox-s">Est.Seg Almox</th>
-              <th>Demanda Pedido</th><th>Qtde Pend. OP</th><th>Ordens Abertas</th>
-              <th>Saldo vs Demanda</th><th>Saldo Real</th><th>Est.Seg</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="filtrosBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('filtros')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('filtros')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: SALDOS ===== -->
-  <div id="tab-saldos" class="hidden">
-    <div class="panel">
-      <div class="panel-header">💰 Saldos por Almoxarifado</div>
-      <div class="filter-bar">
-        <label>Almox de referência:</label>
-        <select id="saldo-ref" onchange="renderSaldos()"></select>
-        <label><input type="checkbox" id="saldo-mostrar-zero" onchange="renderSaldos()"> Mostrar saldo zero</label>
-        <input type="text" id="busca-saldo" placeholder="Pesquisar item..." oninput="renderSaldos()">
-      </div>
-      <div class="metrics-bar" id="saldo-metrics"></div>
-      <div class="tbl-wrap" style="max-height:420px">
-        <table>
-          <thead><tr id="saldo-thead"><th>Codigo</th><th>Descrição</th></tr></thead>
-          <tbody id="saldoBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('saldos')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('saldos')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: ESTOQUES ===== -->
-  <div id="tab-estoques" class="hidden">
-    <div class="panel">
-      <div class="panel-header">📦 Estoque de Segurança</div>
-      <div class="filter-bar">
-        <label>Almox:</label>
-        <select id="estq-almox" onchange="renderEstoques()"></select>
-        <label><input type="checkbox" id="estq-inc-op" onchange="renderEstoques()"> + Pendente OP</label>
-        <label><input type="checkbox" id="estq-inc-ordens" onchange="renderEstoques()"> + Ordens Abertas</label>
-        <label><input type="checkbox" id="estq-apenas-abaixo" onchange="renderEstoques()"> Só abaixo</label>
-        <select id="estq-ordem" onchange="renderEstoques()">
-          <option value="dif">Diferença (maior déficit)</option>
-          <option value="cod">Código</option>
-          <option value="status">Status</option>
-        </select>
-        <input type="text" id="busca-estq" placeholder="Pesquisar..." oninput="renderEstoques()">
-      </div>
-      <div class="metrics-bar" id="estq-metrics"></div>
-      <div class="tbl-wrap" style="max-height:400px">
-        <table>
-          <thead><tr><th>Codigo</th><th>Descrição</th><th id="estq-col-almox">Saldo</th><th>Saldo Efetivo</th><th>Est.Seg</th><th>Diferença</th><th>Status</th></tr></thead>
-          <tbody id="estqBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('estoques')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('estoques')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: DEMANDAS ===== -->
-  <div id="tab-demandas" class="hidden">
-    <div class="panel">
-      <div class="panel-header">📋 Análise de Demandas</div>
-      <div class="filter-bar">
-        <label>Almox:</label>
-        <select id="dem-almox" onchange="renderDemandas()"></select>
-        <label><input type="checkbox" id="dem-dc" onchange="renderDemandas()" checked> DC</label>
-        <label><input type="checkbox" id="dem-op" onchange="renderDemandas()" checked> Pendente OP</label>
-        <label><input type="checkbox" id="dem-ordens" onchange="renderDemandas()" checked> Ordens</label>
-        <label><input type="checkbox" id="dem-apenas" onchange="renderDemandas()"> Só com demanda</label>
-        <input type="text" id="busca-dem" placeholder="Pesquisar..." oninput="renderDemandas()">
-      </div>
-      <div class="metrics-bar" id="dem-metrics"></div>
-      <div class="tbl-wrap" style="max-height:400px">
-        <table>
-          <thead><tr><th>Codigo</th><th>Descrição</th><th id="dem-col-almox">Saldo</th><th>Demanda Pedido</th><th>Qtde Pend. OP</th><th>Ordens</th><th>Demanda Total</th><th>Saldo vs Dem.</th><th>Cobertura %</th><th>Status</th></tr></thead>
-          <tbody id="demBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('demandas')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('demandas')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== ABA: SUGESTÃO ===== -->
-  <div id="tab-sugestao" class="hidden">
-    <div class="panel">
-      <div class="panel-header">🏭 Sugestão de Produção</div>
-      <div class="filter-bar">
-        <label>Almox:</label>
-        <select id="sug-almox" onchange="renderSugestao()"></select>
-        <label><input type="checkbox" id="sug-ordens" onchange="renderSugestao()" checked> + Ordens no saldo</label>
-        <label><input type="checkbox" id="sug-estq" onchange="renderSugestao()" checked> + Est.Seg na sugestão</label>
-      </div>
-      <div class="metrics-bar" id="sug-metrics"></div>
-
-      <!-- Sugestão visual tipo card (replica bloco Python) -->
-      <div id="sug-cards-box" style="padding:8px;background:#1e3a5c;margin:6px;border-radius:4px;color:white;display:none">
-        <div style="font-size:12px;font-weight:700;margin-bottom:10px" id="sug-cards-titulo"></div>
-        <div id="sug-cards-list"></div>
-        <div id="sug-cards-mais" style="color:rgba(255,255,255,.6);font-size:11px;margin-top:6px"></div>
-      </div>
-
-      <div class="tbl-wrap" style="max-height:380px">
-        <table>
-          <thead><tr><th>Codigo</th><th>Descrição</th><th id="sug-col-almox">Saldo</th><th>Demanda Pedido</th><th>Qtde Pend. OP</th><th>Est.Seg</th><th>Qtde Sugerida</th><th>Status</th></tr></thead>
-          <tbody id="sugBody"></tbody>
-        </table>
-      </div>
-      <div class="dl-bar">
-        <button class="btn btn-sm" onclick="downloadCSV('sugestao')">📥 CSV</button>
-        <button class="btn btn-sm" onclick="downloadXLSX('sugestao')">📥 Excel</button>
-      </div>
-    </div>
-  </div>
-
-</div><!-- end dash -->
-
-<script>
-// ============================================================
-// ESTADO GLOBAL
-// ============================================================
-const DB = {
-  saldo: [],
-  perfil: [],
-  ordens: [],
-  previsao: [],
-  parametros: [],
-};
-
-let dfFull = [];
-let opcaoAlmox = [];
-let currentDownloadData = {};
-let itensOcultados = new Set();
-let filtroStatusGlobal = 'TODOS';
-
-// ============================================================
-// UTILIDADES
-// ============================================================
-function fmt(n, dec=0){
-  if(n==null||isNaN(n)||n==='') return '';
-  return Number(n).toLocaleString('pt-BR',{minimumFractionDigits:dec,maximumFractionDigits:dec});
-}
-function hoje(){
-  return new Date().toLocaleDateString('pt-BR');
-}
-function tratarNumero(v){
-  if(v==null||v===''||v===undefined) return 0;
-  let s = String(v).trim().replace(/[^\d,.\-]/g,'');
-  if(s.includes(',')) s = s.replace(/\./g,'').replace(',','.');
-  return parseFloat(s)||0;
-}
-function msg(tipo, texto, container='upload-msgs'){
-  const cls = tipo==='ok'?'msg-ok':tipo==='warn'?'msg-warn':'msg-info';
-  document.getElementById(container).innerHTML += `<div class="${cls}">${texto}</div>`;
-}
-function clearMsgs(container='upload-msgs'){
-  document.getElementById(container).innerHTML='';
-}
-function badgeHtml(st){
-  if(st==='OK') return '<span class="badge badge-ok">✔ OK</span>';
-  if(st==='RISCO') return '<span class="badge badge-risco">⚠ RISCO</span>';
-  if(st==='FALTA') return '<span class="badge badge-falta">● FALTA</span>';
-  if(st==='ABAIXO') return '<span class="badge badge-falta">⬇ ABAIXO</span>';
-  return st;
-}
-function metricChip(lbl, val){
-  return `<div class="metric-chip"><div class="metric-chip-lbl">${lbl}</div><div class="metric-chip-val">${val}</div></div>`;
-}
-function rowClass(st){
-  if(st==='FALTA'||st==='ABAIXO') return 'row-falta';
-  if(st==='RISCO') return 'row-risco';
-  return '';
-}
-
-// ============================================================
-// NAV
-// ============================================================
-const TABS = ['upload','resumo','filtros','saldos','estoques','demandas','sugestao'];
-function showMain(tab){
-  TABS.forEach(t=>{
-    document.getElementById('tab-'+t).classList.toggle('hidden', t!==tab);
-  });
-  document.querySelectorAll('.ntab').forEach((el,i)=>{
-    el.classList.toggle('active', TABS[i]===tab);
-  });
-  if(tab==='resumo') { populateAlmoxSelects(); renderResumo(); }
-  if(tab==='filtros') { populateAlmoxSelects(); buildOcultarList(); renderFiltros(); }
-  if(tab==='saldos') { populateAlmoxSelects(); renderSaldos(); }
-  if(tab==='estoques') { populateAlmoxSelects(); renderEstoques(); }
-  if(tab==='demandas') { populateAlmoxSelects(); renderDemandas(); }
-  if(tab==='sugestao') { populateAlmoxSelects(); renderSugestao(); }
-}
-
-document.getElementById('dataAtual').textContent = hoje();
-
-// ============================================================
-// UPLOAD: SALDO CSV
-// ============================================================
-function carregarSaldoCSV(input){
-  const file = input.files[0]; if(!file) return;
-  Papa.parse(file,{header:true,skipEmptyLines:true,complete(res){
-    const sample = res.data[0]||{};
-    const keys = Object.keys(sample);
-    DB.saldo = res.data.map(r=>{
-      const cod = (r['Codigo']||r['CODIGO']||r['codigo']||'').trim();
-      const obj = {Codigo: cod, 'Saldo Total': tratarNumero(r['Saldo Total']||r['SALDO TOTAL']||0)};
-      // Capturar todas colunas de saldo almox dinamicamente
-      keys.filter(k=>k.toUpperCase().includes('SALDO')||k.toUpperCase().includes('ALMOX')).forEach(k=>{ obj[k]=tratarNumero(r[k]); });
-      return obj;
-    }).filter(r=>r.Codigo);
-    // Deduplica por codigo (mais recente)
-    const seen={}; DB.saldo=DB.saldo.filter(r=>{ if(seen[r.Codigo]) return false; seen[r.Codigo]=true; return true; });
-    setLoaded('box-saldo-csv','sub-saldo-csv',file.name,DB.saldo.length+' itens');
-  }});
-}
-
-function infoSaldoPDF(input){
-  const file = input.files[0]; if(!file) return;
-  setLoaded('box-saldo-pdf','sub-saldo-pdf',file.name,'PDF recebido');
-  msg('warn','⚠️ PDFs de saldo requerem processamento Python (pdfplumber). Use a aba Saldo CSV com arquivo exportado pelo sistema.');
-}
-
-// ============================================================
-// UPLOAD: PERFIL CSV
-// ============================================================
-function carregarPerfil(input){
-  const file = input.files[0]; if(!file) return;
-  Papa.parse(file,{header:true,skipEmptyLines:true,complete(res){
-    DB.perfil = res.data.map(r=>{
-      const keys = Object.keys(r);
-      const findKey = (...terms)=>keys.find(k=>terms.some(t=>k.toUpperCase().includes(t)))||'';
-      const kItem=findKey('ITEM','COD','CODIGO');
-      const kTipo=findKey('TIPO','TYPE');
-      const kDt=findKey('DATA','DT');
-      const kQtd=findKey('QUANT','QTD','QTDE');
-      return {
-        Item: (r[kItem]||'').trim(),
-        Tipo: (r[kTipo]||'').trim().toUpperCase(),
-        'Data Fim': r[kDt]||'',
-        Quantidade: tratarNumero(r[kQtd]),
-      };
-    }).filter(r=>r.Item);
-    setLoaded('box-perfil','sub-perfil',file.name,DB.perfil.length+' registros');
-  }});
-}
-
-// ============================================================
-// UPLOAD: ORDENS CSV
-// ============================================================
-function carregarOrdens(input){
-  const file = input.files[0]; if(!file) return;
-  Papa.parse(file,{header:true,skipEmptyLines:true,complete(res){
-    DB.ordens = res.data;
-    setLoaded('box-ordens','sub-ordens',file.name,res.data.length+' ordens');
-  }});
-}
-
-// ============================================================
-// UPLOAD: PREVISÃO EXCEL
-// ============================================================
-function carregarPrevisao(input){
-  const file = input.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const wb = XLSX.read(e.target.result,{type:'array'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    let hIdx = raw.findIndex(row=>row.some(c=>String(c).toUpperCase().includes('COD')));
-    if(hIdx<0) hIdx=0;
-    const headers = raw[hIdx].map(c=>String(c).toUpperCase().trim());
-    const codIdx = headers.findIndex(h=>h.includes('COD'));
-    const prodIdx = headers.findIndex(h=>h.includes('PROD')||h.includes('DESC'));
-    DB.previsao = raw.slice(hIdx+1).filter(r=>r[codIdx]).map(r=>({
-      COD: String(r[codIdx]).trim(),
-      PRODUTO: String(prodIdx>=0?r[prodIdx]:'').trim()
-    }));
-    // Deduplica
-    const seen={}; DB.previsao=DB.previsao.filter(r=>{ if(seen[r.COD]) return false; seen[r.COD]=true; return true; });
-    setLoaded('box-previsao','sub-previsao',file.name,DB.previsao.length+' itens');
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-// ============================================================
-// UPLOAD: PARÂMETROS EXCEL
-// ============================================================
-function carregarParametros(input){
-  const file = input.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const wb = XLSX.read(e.target.result,{type:'array'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json(ws,{defval:0});
-    DB.parametros = raw.map(r=>{
-      const keys = Object.keys(r);
-      const findKey = (...terms)=>keys.find(k=>terms.some(t=>k.toUpperCase().includes(t)))||'';
-      const codKey=findKey('COD ITEM','CODIGO','CÓDIGO','COD');
-      const estqKey=findKey('ESTQ SEG','ESTOQUE SEG','EST SEG','ESTSEG');
-      const umKey=findKey(' UM','UNID','UM ');
-      const consKey=findKey('CONS MEDIO','CONSUMO MED','CONS MED');
-      const loteMinKey=findKey('LOTE MIN');
-      const loteMultKey=findKey('LOTE MULT','MULT');
-      return {
-        Codigo: String(r[codKey]||'').trim(),
-        'Estq Seg': tratarNumero(r[estqKey]),
-        UM: String(r[umKey]||'').trim(),
-        'CONS MEDIO': tratarNumero(r[consKey]),
-        'LOTE MIN': tratarNumero(r[loteMinKey]),
-        'LOTE MULT': tratarNumero(r[loteMultKey]),
-      };
-    }).filter(r=>r.Codigo);
-    setLoaded('box-params','sub-params',file.name,DB.parametros.length+' itens');
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function setLoaded(boxId, subId, nome, info){
-  document.getElementById(boxId).classList.add('loaded');
-  document.getElementById(subId).textContent = nome.substring(0,22)+(nome.length>22?'...':'')+'  ('+info+')';
-}
-
-// ============================================================
-// LIMPAR BASE
-// ============================================================
-function limparBase(){
-  DB.saldo=[]; DB.perfil=[]; DB.ordens=[]; DB.previsao=[]; DB.parametros=[];
-  dfFull=[]; itensOcultados.clear();
-  ['box-saldo-csv','box-saldo-pdf','box-perfil','box-ordens','box-previsao','box-params'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.classList.remove('loaded');
-  });
-  ['sub-saldo-csv','sub-saldo-pdf','sub-perfil','sub-ordens','sub-previsao','sub-params'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.textContent='Clique para selecionar';
-  });
-  clearMsgs();
-  document.getElementById('base-preview').innerHTML='';
-  msg('ok','✅ Base de dados limpa com sucesso.');
-}
-
-// ============================================================
-// CALCULAR dfFull
-// ============================================================
-function calcularBase(){
-  clearMsgs();
-
-  const base = DB.previsao.length>0
-    ? DB.previsao.map(r=>({Codigo:r.COD, Descricao:r.PRODUTO}))
-    : DB.saldo.map(r=>({Codigo:r.Codigo, Descricao:r.Codigo}));
-
-  if(base.length===0){
-    msg('warn','⚠️ Nenhum dado carregado. Faça upload dos arquivos primeiro.');
-    return false;
-  }
-
-  const saldoMap = {};
-  DB.saldo.forEach(r=>{ saldoMap[r.Codigo]=r; });
-
-  // Detectar colunas de almox
-  const primeiroSaldo = DB.saldo[0]||{};
-  const allSaldoKeys = Object.keys(primeiroSaldo).filter(k=>k!=='Codigo');
-  opcaoAlmox = allSaldoKeys.filter(k=>k.toUpperCase().includes('SALDO')||k.toUpperCase().includes('ALMOX'));
-  if(opcaoAlmox.length===0) opcaoAlmox = allSaldoKeys;
-  if(opcaoAlmox.length===0) opcaoAlmox = ['Saldo Total'];
-
-  // DC: demanda pedido
-  const dcMap = {};
-  DB.perfil.filter(r=>r.Tipo==='DC').forEach(r=>{
-    dcMap[r.Item]=(dcMap[r.Item]||0)+r.Quantidade;
-  });
-
-  // OP: pendente OP
-  const opMap = {};
-  DB.perfil.filter(r=>['OP','ORDEM','LIBERADA'].includes(r.Tipo)).forEach(r=>{
-    opMap[r.Item]=(opMap[r.Item]||0)+r.Quantidade;
-  });
-
-  // Ordens abertas
-  const ordensMap = {};
-  if(DB.ordens.length>0){
-    const firstRow = DB.ordens[0];
-    const keys = Object.keys(firstRow);
-    const kCod=keys.find(k=>['COD','ITEM','PRODUTO','CODIGO','CÓDIGO'].some(t=>k.toUpperCase().includes(t)));
-    const kQtd=keys.find(k=>['QTDE','QTD','QUANTIDADE','SALDO ORDEM'].some(t=>k.toUpperCase().includes(t)));
-    const kSt=keys.find(k=>['STATUS','SITUAÇÃO','SITUACAO','SIT'].some(t=>k.toUpperCase().includes(t)));
-    const statusAberto=['ABERTO','ABERTA','EM ABERTO','LIBERADA','LIBERADO','PENDENTE','A PRODUZIR'];
-    DB.ordens.forEach(r=>{
-      if(kSt){
-        const st=String(r[kSt]||'').toUpperCase().trim();
-        if(!statusAberto.includes(st)) return;
-      }
-      const cod=String(r[kCod]||'').trim();
-      ordensMap[cod]=(ordensMap[cod]||0)+tratarNumero(r[kQtd]);
-    });
-  }
-
-  const paramMap = {};
-  DB.parametros.forEach(r=>{ paramMap[r.Codigo]=r; });
-
-  dfFull = base.map(row=>{
-    const cod = row.Codigo;
-    const sal = saldoMap[cod]||{};
-    const pr = paramMap[cod]||{};
-    const obj = {
-      Codigo: cod,
-      Descricao: row.Descricao,
-      'Saldo Total': tratarNumero(sal['Saldo Total']),
-      'Demanda Pedido': dcMap[cod]||0,
-      'Qtde Pendente OP': opMap[cod]||0,
-      'Qtde Ordens Abertas': ordensMap[cod]||0,
-      'Estq Seg': tratarNumero(pr['Estq Seg']),
-      UM: pr.UM||'',
-      'CONS MEDIO': tratarNumero(pr['CONS MEDIO']),
-      'LOTE MIN': tratarNumero(pr['LOTE MIN']),
-      'LOTE MULT': tratarNumero(pr['LOTE MULT']),
-    };
-    opcaoAlmox.forEach(k=>{ obj[k]=tratarNumero(sal[k]); });
-    return obj;
-  });
-
-  return true;
-}
-
-function calcStatus(row, almoxDem, almoxSeg, usarOrdens){
-  const saldoReal = (row[almoxDem]||0) + (usarOrdens ? row['Qtde Ordens Abertas'] : 0)
-    - row['Demanda Pedido'] - row['Qtde Pendente OP'];
-  const abaixoSeg = (row[almoxSeg]||0) < row['Estq Seg'];
-  if(saldoReal < 0) return 'FALTA';
-  if(abaixoSeg) return 'RISCO';
-  if(row['Demanda Pedido']+row['Qtde Pendente OP'] >= (row[almoxSeg]||0)*0.5 && (row['Demanda Pedido']+row['Qtde Pendente OP'])>0) return 'RISCO';
-  return 'OK';
-}
-
-// ============================================================
-// GERAR DASHBOARD
-// ============================================================
-function gerarDashboard(){
-  if(!calcularBase()) return;
-  populateAlmoxSelects();
-  document.getElementById('base-preview').innerHTML =
-    `<div class="msg-ok">✅ Base gerada: ${dfFull.length} itens | Almoxarifados: ${opcaoAlmox.join(', ')}</div>`;
-  showMain('resumo');
-}
-
-function populateAlmoxSelects(){
-  const selects=[
-    {id:'res-almox-dem', pref:'3'},
-    {id:'res-almox-seg', pref:'30'},
-    {id:'flt-almox-dem', pref:'3'},
-    {id:'flt-almox-seg', pref:'30'},
-    {id:'saldo-ref', pref:''},
-    {id:'estq-almox', pref:'30'},
-    {id:'dem-almox', pref:'3'},
-    {id:'sug-almox', pref:'3'},
-  ];
-  selects.forEach(({id, pref})=>{
-    const el=document.getElementById(id); if(!el) return;
-    const prev=el.value;
-    el.innerHTML=opcaoAlmox.map(o=>`<option value="${o}">${o}</option>`).join('');
-    const prefEl=opcaoAlmox.find(a=>pref&&a.includes(pref));
-    if(prev && opcaoAlmox.includes(prev)) el.value=prev;
-    else if(prefEl) el.value=prefEl;
-  });
-}
-
-// ============================================================
-// RESUMO
-// ============================================================
-function renderResumo(){
-  if(!dfFull.length){ if(!calcularBase()) return; if(!dfFull.length) return; }
-  const almD=(document.getElementById('res-almox-dem')||{}).value||opcaoAlmox[0];
-  const almS=(document.getElementById('res-almox-seg')||{}).value||opcaoAlmox[opcaoAlmox.length-1]||almD;
-  const usarOrdens=(document.getElementById('res-ordens')||{}).checked!==false;
-
-  const rows = dfFull.map(r=>({...r,
-    'Saldo Real': (r[almD]||0)+(usarOrdens?r['Qtde Ordens Abertas']:0)-r['Demanda Pedido']-r['Qtde Pendente OP'],
-    Status: calcStatus(r, almD, almS, usarOrdens)
-  }));
-
-  const nTotal=rows.length, nFalta=rows.filter(r=>r.Status==='FALTA').length;
-  const nRisco=rows.filter(r=>r.Status==='RISCO').length, nOk=rows.filter(r=>r.Status==='OK').length;
-
-  document.getElementById('statusCards').innerHTML=`
-    <div class="scard scard-total" onclick="filtrarEIr('TODOS')"><div class="scard-lbl">📦 Total</div><div class="scard-num">${nTotal}</div><div class="scard-sub">itens na base</div></div>
-    <div class="scard scard-falta" onclick="filtrarEIr('FALTA')"><div class="scard-lbl">🔴 Falta</div><div class="scard-num">${nFalta}</div><div class="scard-sub">produção urgente</div></div>
-    <div class="scard scard-risco" onclick="filtrarEIr('RISCO')"><div class="scard-lbl">🟡 Risco</div><div class="scard-num">${nRisco}</div><div class="scard-sub">abaixo est. seg.</div></div>
-    <div class="scard scard-ok" onclick="filtrarEIr('OK')"><div class="scard-lbl">🟢 OK</div><div class="scard-num">${nOk}</div><div class="scard-sub">dentro do esperado</div></div>
-  `;
-
-  const colEl=document.getElementById('res-col-almox');
-  if(colEl) colEl.textContent=almD;
-
-  currentDownloadData.resumo = rows;
-  document.getElementById('resumoBody').innerHTML = rows.map(r=>{
-    const cls=rowClass(r.Status);
-    return `<tr class="${cls}">
-      <td><b>${r.Codigo}</b></td>
-      <td style="max-width:200px;white-space:normal;font-size:9px">${r.Descricao}</td>
-      <td style="text-align:right">${fmt(r[almD]||0)}</td>
-      <td style="text-align:right">${fmt(r['Demanda Pedido'])}</td>
-      <td style="text-align:right;font-weight:700;color:${r['Saldo Real']<0?'#9c0006':'#1e6b2e'}">${fmt(r['Saldo Real'])}</td>
-      <td>${badgeHtml(r.Status)}</td>
-    </tr>`;
-  }).join('')||'<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>';
-}
-
-function filtrarEIr(status){
-  filtroStatusGlobal=status;
-  showMain('filtros');
-  const el=document.getElementById('flt-status');
-  if(el) el.value=(status==='TODOS'?'':status);
-  renderFiltros();
-}
-
-// ============================================================
-// FILTROS
-// ============================================================
-function buildOcultarList(){
-  const sel=document.getElementById('flt-ocultar');
-  if(!sel||!dfFull.length) return;
-  const codigos=dfFull.map(r=>r.Codigo).sort();
-  sel.innerHTML=codigos.map(c=>`<option value="${c}" ${itensOcultados.has(c)?'selected':''}>${c}</option>`).join('');
-}
-function aplicarOcultar(){
-  const sel=document.getElementById('flt-ocultar');
-  itensOcultados.clear();
-  Array.from(sel.selectedOptions).forEach(o=>itensOcultados.add(o.value));
-  renderFiltros();
-}
-function limparOcultar(){
-  itensOcultados.clear();
-  const sel=document.getElementById('flt-ocultar');
-  if(sel) Array.from(sel.options).forEach(o=>o.selected=false);
-  renderFiltros();
-}
-
-function renderFiltros(){
-  if(!dfFull.length) return;
-  const almD=(document.getElementById('flt-almox-dem')||{}).value||opcaoAlmox[0];
-  const almS=(document.getElementById('flt-almox-seg')||{}).value||opcaoAlmox[opcaoAlmox.length-1]||almD;
-  const usarOrdens=(document.getElementById('flt-ordens')||{}).checked!==false;
-  const busca=(document.getElementById('busca-flt')||{}).value||'';
-  const filtSt=(document.getElementById('flt-status')||{}).value||'';
-
-  // Atualizar headers
-  const hd=document.getElementById('flt-col-almox-d'); if(hd) hd.textContent='Saldo '+almD;
-  const hs=document.getElementById('flt-col-almox-s'); if(hs) hs.textContent='Saldo '+almS;
-
-  let rows=dfFull
-    .filter(r=>!itensOcultados.has(r.Codigo))
-    .map(r=>{
-      const saldoReal=(r[almD]||0)+(usarOrdens?r['Qtde Ordens Abertas']:0)-r['Demanda Pedido']-r['Qtde Pendente OP'];
-      const st=calcStatus(r, almD, almS, usarOrdens);
-      return {...r, SaldoVsDem:(r[almD]||0)-r['Demanda Pedido'], SaldoReal:saldoReal, Status:st};
-    });
-  if(busca) rows=rows.filter(r=>r.Codigo.toLowerCase().includes(busca.toLowerCase())||String(r.Descricao).toLowerCase().includes(busca.toLowerCase()));
-  if(filtSt) rows=rows.filter(r=>r.Status===filtSt);
-
-  currentDownloadData.filtros=rows;
-  const nFalta=rows.filter(r=>r.Status==='FALTA').length;
-  const nRisco=rows.filter(r=>r.Status==='RISCO').length;
-  const nOk=rows.filter(r=>r.Status==='OK').length;
-  document.getElementById('flt-metrics').innerHTML=
-    metricChip('Total',rows.length)+metricChip('🔴 Falta',nFalta)+metricChip('🟡 Risco',nRisco)+metricChip('🟢 OK',nOk)+
-    metricChip('Almox Dem.',almD)+metricChip('Almox Seg.',almS)+
-    (itensOcultados.size?metricChip('🚫 Ocultos',itensOcultados.size):'');
-
-  document.getElementById('filtrosBody').innerHTML=rows.map(r=>{
-    const cls=rowClass(r.Status);
-    return `<tr class="${cls}">
-      <td><b>${r.Codigo}</b></td>
-      <td style="font-size:9px;max-width:160px;white-space:normal">${r.Descricao}</td>
-      <td style="text-align:right">${fmt(r[almD]||0)}</td>
-      <td style="text-align:right">${fmt(r[almS]||0)}</td>
-      <td style="text-align:right">${fmt(r['Demanda Pedido'])}</td>
-      <td style="text-align:right">${fmt(r['Qtde Pendente OP'])}</td>
-      <td style="text-align:right">${fmt(r['Qtde Ordens Abertas'])}</td>
-      <td style="text-align:right;font-weight:700;color:${r.SaldoVsDem<0?'#9c0006':'#1e6b2e'}">${fmt(r.SaldoVsDem)}</td>
-      <td style="text-align:right;font-weight:700;color:${r.SaldoReal<0?'#9c0006':'#1e6b2e'}">${fmt(r.SaldoReal)}</td>
-      <td style="text-align:right">${fmt(r['Estq Seg'])}</td>
-      <td>${badgeHtml(r.Status)}</td>
-    </tr>`;
-  }).join('')||'<tr><td colspan="11" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>';
-}
-
-// ============================================================
-// SALDOS
-// ============================================================
-function renderSaldos(){
-  if(!dfFull.length) return;
-  const almoxRef=(document.getElementById('saldo-ref')||{}).value||opcaoAlmox[0];
-  const mostrarZero=(document.getElementById('saldo-mostrar-zero')||{}).checked;
-  const busca=(document.getElementById('busca-saldo')||{}).value||'';
-
-  // Monta join base + saldo
-  const saldoMap={};
-  DB.saldo.forEach(r=>{ saldoMap[r.Codigo]=r; });
-  const base=DB.previsao.length>0
-    ? DB.previsao.map(r=>({Codigo:r.COD,Descricao:r.PRODUTO}))
-    : DB.saldo.map(r=>({Codigo:r.Codigo,Descricao:r.Codigo}));
-
-  let rows=base.map(row=>{
-    const sal=saldoMap[row.Codigo]||{};
-    const obj={Codigo:row.Codigo,Descricao:row.Descricao};
-    opcaoAlmox.forEach(k=>{ obj[k]=tratarNumero(sal[k]); });
-    return obj;
-  });
-
-  if(!mostrarZero) rows=rows.filter(r=>(r[almoxRef]||0)>0);
-  if(busca) rows=rows.filter(r=>r.Codigo.toLowerCase().includes(busca.toLowerCase())||String(r.Descricao).toLowerCase().includes(busca.toLowerCase()));
-
-  currentDownloadData.saldos=rows;
-
-  const total=rows.filter(r=>(r[almoxRef]||0)>0).length;
-  const semSaldo=rows.filter(r=>(r[almoxRef]||0)===0).length;
-  const somaRef=rows.reduce((s,r)=>s+(r[almoxRef]||0),0);
-  document.getElementById('saldo-metrics').innerHTML=
-    metricChip('Com saldo',total)+metricChip(`Soma ${almoxRef}`,fmt(somaRef))+metricChip('Sem saldo',semSaldo);
-
-  // Build thead dinamico
-  const thead=document.getElementById('saldo-thead');
-  if(thead) thead.innerHTML='<th>Codigo</th><th>Descrição</th>'+opcaoAlmox.map(k=>`<th>${k}</th>`).join('');
-
-  document.getElementById('saldoBody').innerHTML=rows.map(r=>`
-    <tr>
-      <td><b>${r.Codigo}</b></td>
-      <td style="font-size:9px;max-width:180px;white-space:normal">${r.Descricao}</td>
-      ${opcaoAlmox.map(k=>`<td style="text-align:right">${fmt(r[k]||0)}</td>`).join('')}
-    </tr>`).join('')||'<tr><td colspan="10" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>';
-}
-
-// ============================================================
-// ESTOQUES
-// ============================================================
-function renderEstoques(){
-  if(!dfFull.length) return;
-  const almox=(document.getElementById('estq-almox')||{}).value||opcaoAlmox[0];
-  const incOP=(document.getElementById('estq-inc-op')||{}).checked;
-  const incOrdens=(document.getElementById('estq-inc-ordens')||{}).checked;
-  const apenasAbaixo=(document.getElementById('estq-apenas-abaixo')||{}).checked;
-  const ordem=(document.getElementById('estq-ordem')||{}).value||'dif';
-  const busca=(document.getElementById('busca-estq')||{}).value||'';
-
-  const hcol=document.getElementById('estq-col-almox'); if(hcol) hcol.textContent=almox;
-
-  let rows=dfFull.map(r=>{
-    let ef=(r[almox]||0);
-    if(incOP) ef+=r['Qtde Pendente OP'];
-    if(incOrdens) ef+=r['Qtde Ordens Abertas'];
-    const diff=ef-r['Estq Seg'];
-    return {...r, SaldoEfetivo:ef, Diferenca:diff, StatusEstq:diff<0?'ABAIXO':'OK'};
-  });
-  if(apenasAbaixo) rows=rows.filter(r=>r.StatusEstq==='ABAIXO');
-  if(busca) rows=rows.filter(r=>r.Codigo.toLowerCase().includes(busca.toLowerCase())||String(r.Descricao).toLowerCase().includes(busca.toLowerCase()));
-  if(ordem==='dif') rows.sort((a,b)=>a.Diferenca-b.Diferenca);
-  else if(ordem==='cod') rows.sort((a,b)=>a.Codigo.localeCompare(b.Codigo));
-  else rows.sort((a,b)=>a.StatusEstq.localeCompare(b.StatusEstq));
-
-  currentDownloadData.estoques=rows;
-  const nAbaixo=rows.filter(r=>r.StatusEstq==='ABAIXO').length;
-  const nOk=rows.filter(r=>r.StatusEstq==='OK').length;
-  document.getElementById('estq-metrics').innerHTML=
-    metricChip('⬇️ Abaixo',nAbaixo)+metricChip('✅ OK',nOk)+metricChip('Almox',almox)+metricChip('Total',rows.length);
-
-  document.getElementById('estqBody').innerHTML=rows.map(r=>{
-    const cls=r.StatusEstq==='ABAIXO'?'row-falta':'row-ok';
-    return `<tr class="${cls}">
-      <td><b>${r.Codigo}</b></td>
-      <td style="font-size:9px;max-width:160px;white-space:normal">${r.Descricao}</td>
-      <td style="text-align:right">${fmt(r[almox]||0)}</td>
-      <td style="text-align:right">${fmt(r.SaldoEfetivo)}</td>
-      <td style="text-align:right">${fmt(r['Estq Seg'])}</td>
-      <td style="text-align:right;color:${r.Diferenca<0?'#9c0006':'#1e6b2e'};font-weight:700">${fmt(r.Diferenca)}</td>
-      <td>${badgeHtml(r.StatusEstq)}</td>
-    </tr>`;
-  }).join('')||'<tr><td colspan="7" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>';
-}
-
-// ============================================================
-// DEMANDAS
-// ============================================================
-function renderDemandas(){
-  if(!dfFull.length) return;
-  const almox=(document.getElementById('dem-almox')||{}).value||opcaoAlmox[0];
-  const incDC=(document.getElementById('dem-dc')||{}).checked!==false;
-  const incOP=(document.getElementById('dem-op')||{}).checked!==false;
-  const incOrdens=(document.getElementById('dem-ordens')||{}).checked!==false;
-  const apenasComDem=(document.getElementById('dem-apenas')||{}).checked;
-  const busca=(document.getElementById('busca-dem')||{}).value||'';
-
-  const hcol=document.getElementById('dem-col-almox'); if(hcol) hcol.textContent=almox;
-
-  let rows=dfFull.map(r=>{
-    let dem=0;
-    if(incDC) dem+=r['Demanda Pedido'];
-    if(incOP) dem+=r['Qtde Pendente OP'];
-    if(incOrdens) dem+=r['Qtde Ordens Abertas'];
-    const svd=(r[almox]||0)-dem;
-    const cob=dem>0?Math.round((r[almox]||0)/dem*100):0;
-    return {...r, DemandaTotal:dem, SaldoVsDem:svd, Cobertura:cob, Status:svd<0?'FALTA':'OK'};
-  });
-  if(apenasComDem) rows=rows.filter(r=>r.DemandaTotal>0);
-  if(busca) rows=rows.filter(r=>r.Codigo.toLowerCase().includes(busca.toLowerCase())||String(r.Descricao).toLowerCase().includes(busca.toLowerCase()));
-  rows.sort((a,b)=>a.SaldoVsDem-b.SaldoVsDem);
-  currentDownloadData.demandas=rows;
-
-  const nFalta=rows.filter(r=>r.Status==='FALTA').length;
-  document.getElementById('dem-metrics').innerHTML=
-    metricChip('📦 Total',rows.length)+metricChip('🔴 Falta',nFalta)+
-    metricChip('Dem. Total',fmt(rows.reduce((s,r)=>s+r.DemandaTotal,0)))+
-    metricChip('Saldo Total',fmt(rows.reduce((s,r)=>s+(r[almox]||0),0)));
-
-  document.getElementById('demBody').innerHTML=rows.map(r=>{
-    const cls=r.Status==='FALTA'?'row-falta':'';
-    return `<tr class="${cls}">
-      <td><b>${r.Codigo}</b></td>
-      <td style="font-size:9px;max-width:140px;white-space:normal">${r.Descricao}</td>
-      <td style="text-align:right">${fmt(r[almox]||0)}</td>
-      <td style="text-align:right">${fmt(r['Demanda Pedido'])}</td>
-      <td style="text-align:right">${fmt(r['Qtde Pendente OP'])}</td>
-      <td style="text-align:right">${fmt(r['Qtde Ordens Abertas'])}</td>
-      <td style="text-align:right">${fmt(r.DemandaTotal)}</td>
-      <td style="text-align:right;color:${r.SaldoVsDem<0?'#9c0006':'#1e6b2e'};font-weight:700">${fmt(r.SaldoVsDem)}</td>
-      <td style="text-align:right">${r.Cobertura}%</td>
-      <td>${badgeHtml(r.Status)}</td>
-    </tr>`;
-  }).join('')||'<tr><td colspan="10" style="text-align:center;color:#888;padding:12px">Sem dados</td></tr>';
-}
-
-// ============================================================
-// SUGESTÃO
-// ============================================================
-function renderSugestao(){
-  if(!dfFull.length) return;
-  const almox=(document.getElementById('sug-almox')||{}).value||opcaoAlmox[0];
-  const incOrdens=(document.getElementById('sug-ordens')||{}).checked!==false;
-  const incEstqSeg=(document.getElementById('sug-estq')||{}).checked!==false;
-  const almS=opcaoAlmox.find(a=>a.includes('30'))||almox;
-
-  const hcol=document.getElementById('sug-col-almox'); if(hcol) hcol.textContent=almox;
-
-  let rows=dfFull.map(r=>{
-    const saldo=(r[almox]||0)+(incOrdens?r['Qtde Ordens Abertas']:0);
-    const saldoReal=saldo-r['Demanda Pedido']-r['Qtde Pendente OP'];
-    const abaixoSeg=(r[almox]||0)<r['Estq Seg'];
-    let st='OK';
-    if(saldoReal<0) st='FALTA';
-    else if(abaixoSeg) st='RISCO';
-    else if(r['Demanda Pedido']+r['Qtde Pendente OP']>=(r[almS]||0)*0.5 && (r['Demanda Pedido']+r['Qtde Pendente OP'])>0) st='RISCO';
-    const qtdSug=Math.max(r['Demanda Pedido']+r['Qtde Pendente OP']-(r[almox]||0)+(incEstqSeg?r['Estq Seg']:0),0);
-    return {...r, SaldoReal:saldoReal, Status:st, QtdSug:qtdSug};
-  }).filter(r=>r.Status!=='OK'&&r.QtdSug>0)
-    .sort((a,b)=>(a.Status==='FALTA'?0:1)-(b.Status==='FALTA'?0:1)||b.QtdSug-a.QtdSug);
-
-  currentDownloadData.sugestao=rows;
-  const nUrgente=rows.filter(r=>r.Status==='FALTA').length;
-  const nAtencao=rows.filter(r=>r.Status==='RISCO').length;
-  document.getElementById('sug-metrics').innerHTML=
-    metricChip('🔴 Urgente',nUrgente)+metricChip('🟡 Atenção',nAtencao)+metricChip('Total',rows.length);
-
-  // Cards visuais tipo Python
-  const cardsBox=document.getElementById('sug-cards-box');
-  const cardsList=document.getElementById('sug-cards-list');
-  const cardsMais=document.getElementById('sug-cards-mais');
-  if(rows.length>0){
-    cardsBox.style.display='block';
-    document.getElementById('sug-cards-titulo').textContent=`📋 ${rows.length} ITEM(NS) PRECISAM SER PRODUZIDOS`;
-    const top10=rows.slice(0,10);
-    cardsList.innerHTML=top10.map(r=>{
-      const cls=r.Status==='FALTA'?'sug-urgente':'sug-atencao';
-      const emoji=r.Status==='FALTA'?'🔴':'🟡';
-      return `<div class="${cls}" style="background:rgba(255,255,255,.12);border-radius:4px;padding:6px 10px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;border:1px solid rgba(255,255,255,.1)">
-        <div><div style="font-weight:600;font-size:11px">${emoji} ${r.Codigo}</div><div style="font-size:9px;opacity:.75">${String(r.Descricao||'').substring(0,50)}</div></div>
-        <div style="background:rgba(255,255,255,.2);border-radius:3px;padding:3px 8px;font-weight:700;font-size:12px">Prod: ${fmt(r.QtdSug)}</div>
-      </div>`;
-    }).join('');
-    cardsMais.textContent=rows.length>10?`+ ${rows.length-10} outros (baixe o Excel para ver todos)`:'';
-  } else {
-    cardsBox.style.display='none';
-  }
-
-  document.getElementById('sugBody').innerHTML=rows.length===0
-    ?'<tr><td colspan="8" style="text-align:center;color:#27ae60;padding:12px">✅ Nenhum item necessita produção</td></tr>'
-    :rows.map(r=>{
-      const cls=r.Status==='FALTA'?'row-falta':'row-risco';
-      return `<tr class="${cls}">
-        <td><b>${r.Codigo}</b></td>
-        <td style="font-size:9px;max-width:140px;white-space:normal">${r.Descricao}</td>
-        <td style="text-align:right">${fmt(r[almox]||0)}</td>
-        <td style="text-align:right">${fmt(r['Demanda Pedido'])}</td>
-        <td style="text-align:right">${fmt(r['Qtde Pendente OP'])}</td>
-        <td style="text-align:right">${fmt(r['Estq Seg'])}</td>
-        <td style="text-align:right;font-weight:700;color:#1a3a5c">${fmt(r.QtdSug)}</td>
-        <td>${badgeHtml(r.Status)}</td>
-      </tr>`;
-    }).join('');
-}
-
-// ============================================================
-// DOWNLOADS
-// ============================================================
-function downloadCSV(key){
-  const rows=currentDownloadData[key];
-  if(!rows||!rows.length) return alert('Sem dados para exportar.');
-  const cols=Object.keys(rows[0]);
-  const csv=cols.join(',')+'\\n'+rows.map(r=>cols.map(c=>'"'+(r[c]??'')+'"').join(',')).join('\\n');
-  const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
-  a.download=key+'_pcp.csv'; a.click();
-}
-function downloadXLSX(key){
-  const rows=currentDownloadData[key];
-  if(!rows||!rows.length) return alert('Sem dados para exportar.');
-  const ws=XLSX.utils.json_to_sheet(rows);
-  // Formatar cabeçalho
-  const range=XLSX.utils.decode_range(ws['!ref']||'A1');
-  for(let c=range.s.c;c<=range.e.c;c++){
-    const addr=XLSX.utils.encode_cell({r:0,c});
-    if(!ws[addr]) continue;
-    ws[addr].s={fill:{fgColor:{rgb:'1F4E78'}},font:{color:{rgb:'FFFFFF'},bold:true}};
-  }
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Dados');
-  XLSX.writeFile(wb,key+'_pcp.xlsx');
-}
-</script>
-</body>
-</html>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Previsão mês
+        st.markdown('<div class="panel"><div class="panel-header">Previsão mês</div>', unsafe_allow_html=True)
+        prev_rows = "".join(f'<tr><td><b>{r["COD"]}</b></td><td style="text-align:right;font-size:9px">{str(r["PRODUTO"])[:20]}</td></tr>'
+                            for _, r in previsao.head(8).iterrows()) or '<tr><td colspan="2" style="color:#999;text-align:center">—</td></tr>'
+        st.markdown(f"""
+        <div style="overflow:auto;max-height:100px">
+        <table style="width:100%;border-collapse:collapse;font-size:9.5px">
+          <thead><tr>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Codigo</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Produto</th>
+          </tr></thead>
+          <tbody>{prev_rows}</tbody>
+        </table></div>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_right2:
+        # Pedidos por data
+        st.markdown('<div class="panel"><div class="panel-header">Pedidos por data</div>', unsafe_allow_html=True)
+        pedidos_dc = perfil[perfil["Tipo"]=="DC"].sort_values("Data Fim").head(10)
+        ped_rows = "".join(f'<tr><td><b>{r["Item"]}</b></td><td>{r["Data Fim"]}</td><td style="text-align:right">{fmt_num(r["Quantidade"])}</td></tr>'
+                           for _, r in pedidos_dc.iterrows()) or '<tr><td colspan="3" style="color:#999;text-align:center">—</td></tr>'
+        st.markdown(f"""
+        <div style="overflow:auto;max-height:130px">
+        <table style="width:100%;border-collapse:collapse;font-size:9.5px">
+          <thead><tr>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Item</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Data Fim</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Demanda</th>
+          </tr></thead>
+          <tbody>{ped_rows}</tbody>
+        </table></div>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Sugestão mini
+        st.markdown('<div class="panel"><div class="panel-header">Sugestão de Produção</div>', unsafe_allow_html=True)
+        df_sug_mini = rows_dash[rows_dash["Status"].isin(["FALTA","RISCO"])].copy()
+        df_sug_mini["QtdSug"] = df_sug_mini.apply(
+            lambda r: max(r["Demanda Pedido"] + r["Qtde Pendente OP"] - r.get(almox_d_dash,0) + r["Estq Seg"], 0), axis=1)
+        df_sug_mini = df_sug_mini[df_sug_mini["QtdSug"] > 0].sort_values("QtdSug", ascending=False)
+        sug_rows = "".join(
+            f'<tr><td><b>{r["Codigo"]}</b></td><td style="text-align:right">{fmt_num(r["QtdSug"])}</td>'
+            f'<td style="color:#c0392b;font-weight:700;font-size:9px">Produzir</td></tr>'
+            for _, r in df_sug_mini.head(12).iterrows()
+        ) or '<tr><td colspan="3" style="color:#27ae60;text-align:center">Nenhuma sugestão</td></tr>'
+        st.markdown(f"""
+        <div style="overflow:auto;max-height:140px">
+        <table style="width:100%;border-collapse:collapse;font-size:9.5px">
+          <thead><tr>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Codigo</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Sugestão</th>
+            <th style="background:#c0c4c6;border:1px solid #999;padding:3px 5px;position:sticky;top:0">Status</th>
+          </tr></thead>
+          <tbody>{sug_rows}</tbody>
+        </table></div>
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ABA FILTROS
+# ══════════════════════════════════════════════════════════════
+with tab_filtros:
+    st.markdown('<div class="panel"><div class="panel-header">Filtros e Análise Geral</div>', unsafe_allow_html=True)
+
+    col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1.2, 1.2, 0.8, 1.5, 0.8])
+    with col_f1:
+        idx_d = opcoes_almox.index("Saldo Almox 3") if "Saldo Almox 3" in opcoes_almox else 0
+        almox_dem = st.selectbox("Almox Demanda", opcoes_almox, index=idx_d, key="flt_almox_dem")
+    with col_f2:
+        idx_s = opcoes_almox.index("Saldo Almox 30") if "Saldo Almox 30" in opcoes_almox else min(1, len(opcoes_almox)-1)
+        almox_seg = st.selectbox("Almox Est.Seg", opcoes_almox, index=idx_s, key="flt_almox_seg")
+    with col_f3:
+        usar_ordens_flt = st.checkbox("Incl. Ordens Abertas", value=True, key="flt_ordens") if tem_ordens else False
+    with col_f4:
+        busca_flt = st.text_input("Pesquisar código/descrição...", key="busca_flt", placeholder="Pesquisar...")
+    with col_f5:
+        filtro_st_flt = st.selectbox("Status", ["Todos","FALTA","RISCO","OK"], key="flt_status")
+
+    df_calc = df_full.copy()
+    df_calc["Saldo vs Demanda"] = df_calc[almox_dem] - df_calc["Demanda Pedido"]
+    df_calc["Saldo Real"] = (df_calc[almox_dem]
+        + (df_calc["Qtde Ordens Abertas"] if usar_ordens_flt and tem_ordens else 0)
+        - df_calc["Demanda Pedido"] - df_calc["Qtde Pendente OP"])
+    df_calc["Status"] = df_calc.apply(lambda r: calc_status(r, almox_dem, almox_seg, usar_ordens_flt), axis=1)
+
+    if busca_flt:
+        df_calc = df_calc[df_calc["Codigo"].astype(str).str.contains(busca_flt, case=False, na=False) |
+                          df_calc["Descricao"].astype(str).str.contains(busca_flt, case=False, na=False)]
+    if filtro_st_flt != "Todos":
+        df_calc = df_calc[df_calc["Status"] == filtro_st_flt]
+
+    colunas_exibir = ["Codigo","Descricao", almox_dem]
+    if almox_seg != almox_dem: colunas_exibir.append(almox_seg)
+    colunas_exibir += ["Demanda Pedido","Qtde Pendente OP"]
+    if tem_ordens:    colunas_exibir.append("Qtde Ordens Abertas")
+    colunas_exibir += ["Saldo vs Demanda","Saldo Real"]
+    if tem_parametros: colunas_exibir.append("Estq Seg")
+    colunas_exibir.append("Status")
+    colunas_exibir = [c for c in colunas_exibir if c in df_calc.columns]
+
+    st.markdown(f'<div style="font-size:10px;padding:4px 0"><b>{len(df_calc)}</b> item(ns) exibido(s)</div>', unsafe_allow_html=True)
+    st.dataframe(df_calc[colunas_exibir].style.apply(estilo_linha, axis=1), use_container_width=True, height=400)
+
+    col_d1, col_d2 = st.columns(2)
+    with col_d1: st.download_button("📥 Baixar CSV",   df_calc[colunas_exibir].to_csv(index=False).encode("utf-8"), "pcp_filtrado.csv",  mime="text/csv",                                               key="dl_flt_csv")
+    with col_d2: st.download_button("📥 Baixar Excel", exportar_excel_formatado(df_calc[colunas_exibir]),             "pcp_filtrado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_flt_xlsx")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ABA ESTOQUES
+# ══════════════════════════════════════════════════════════════
+with tab_estoques:
+    st.markdown('<div class="panel"><div class="panel-header">Estoque de Segurança</div>', unsafe_allow_html=True)
+    if not tem_parametros:
+        st.markdown('<div class="msg-info">ℹ️ Importe o arquivo de Parâmetros para acessar análise de Estoque de Segurança.</div>', unsafe_allow_html=True)
+    else:
+        col_e1, col_e2, col_e3, col_e4, col_e5 = st.columns([1, 0.7, 0.7, 0.8, 1.2])
+        with col_e1: almox_estq = st.selectbox("Almox", opcoes_almox, index=min(1,len(opcoes_almox)-1), key="estq_almox")
+        with col_e2: inc_op_e  = st.checkbox("+ Pendente OP",     value=False, key="estq_inc_op")
+        with col_e3: inc_ord_e = st.checkbox("+ Ordens Abertas",  value=False, key="estq_inc_ordens") if tem_ordens else False
+        with col_e4: apenas_ab = st.checkbox("Só abaixo",         value=False, key="estq_apenas")
+        with col_e5: busca_e   = st.text_input("Pesquisar...", key="busca_estq", placeholder="Código ou descrição...")
+
+        df_estq = df_full[["Codigo","Descricao", almox_estq,"Demanda Pedido","Qtde Pendente OP","Estq Seg"]].copy()
+        if tem_ordens: df_estq["Qtde Ordens Abertas"] = df_full["Qtde Ordens Abertas"]
+        ef = df_estq[almox_estq].copy()
+        if inc_op_e:  ef = ef + df_estq["Qtde Pendente OP"]
+        if inc_ord_e and tem_ordens: ef = ef + df_estq["Qtde Ordens Abertas"]
+        df_estq["Saldo Efetivo"] = ef
+        df_estq["Diferença"] = df_estq["Saldo Efetivo"] - df_estq["Estq Seg"]
+        df_estq["Status"]    = df_estq["Diferença"].apply(lambda x: "ABAIXO" if x < 0 else "OK")
+        if apenas_ab: df_estq = df_estq[df_estq["Status"] == "ABAIXO"]
+        if busca_e:   df_estq = df_estq[df_estq["Codigo"].astype(str).str.contains(busca_e, case=False, na=False) |
+                                          df_estq["Descricao"].astype(str).str.contains(busca_e, case=False, na=False)]
+        df_estq = df_estq.sort_values("Diferença")
+
+        n_ab = (df_estq["Status"]=="ABAIXO").sum(); n_ok_e = (df_estq["Status"]=="OK").sum()
+        st.markdown(f"""<div class="metric-row">
+          {metric_box("⬇️ Abaixo", n_ab)}{metric_box("✅ OK", n_ok_e)}{metric_box("Almox", almox_estq)}
+        </div>""", unsafe_allow_html=True)
+
+        def estilo_estq(row):
+            if row["Status"] == "ABAIXO": return ["background-color:#ffc7ce; color:#9c0006"] * len(row)
+            return ["background-color:#f0fff4; color:#14532d"] * len(row)
+
+        cols_estq = [c for c in ["Codigo","Descricao", almox_estq,"Saldo Efetivo","Estq Seg","Diferença","Status"] if c in df_estq.columns]
+        st.markdown(f'<div style="font-size:10px;padding:4px 0"><b>{len(df_estq)}</b> item(ns)</div>', unsafe_allow_html=True)
+        st.dataframe(df_estq[cols_estq].style.apply(estilo_estq, axis=1), use_container_width=True, height=400)
+
+        col_d1, col_d2 = st.columns(2)
+        with col_d1: st.download_button("📥 CSV",   df_estq[cols_estq].to_csv(index=False).encode("utf-8"), "estoques.csv",  mime="text/csv", key="dl_estq_csv")
+        with col_d2: st.download_button("📥 Excel", exportar_excel_formatado(df_estq[cols_estq]),             "estoques.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_estq_xlsx")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ABA DEMANDAS
+# ══════════════════════════════════════════════════════════════
+with tab_demandas:
+    st.markdown('<div class="panel"><div class="panel-header">Análise de Demandas</div>', unsafe_allow_html=True)
+
+    col_d1, col_d2, col_d3, col_d4, col_d5, col_d6 = st.columns([1, 0.6, 0.6, 0.6, 0.7, 1.2])
+    with col_d1: almox_dem2 = st.selectbox("Almox", opcoes_almox, index=0, key="dem_almox")
+    with col_d2: inc_dc    = st.checkbox("DC",          value=True, key="dem_dc")
+    with col_d3: inc_op_d  = st.checkbox("Pend. OP",    value=True, key="dem_op")
+    with col_d4: inc_ord_d = st.checkbox("Ordens",      value=True, key="dem_ordens") if tem_ordens else False
+    with col_d5: ap_dem    = st.checkbox("Só c/ demanda", value=False, key="dem_apenas")
+    with col_d6: busca_d   = st.text_input("Pesquisar...", key="busca_dem", placeholder="Código ou descrição...")
+
+    df_dem = df_full[["Codigo","Descricao", almox_dem2,"Demanda Pedido","Qtde Pendente OP"]].copy()
+    if tem_ordens: df_dem["Qtde Ordens Abertas"] = df_full["Qtde Ordens Abertas"]
+    dem_total = pd.Series([0.0]*len(df_dem), index=df_dem.index)
+    if inc_dc:   dem_total = dem_total + df_dem["Demanda Pedido"]
+    if inc_op_d: dem_total = dem_total + df_dem["Qtde Pendente OP"]
+    if inc_ord_d and tem_ordens: dem_total = dem_total + df_dem["Qtde Ordens Abertas"]
+    df_dem["Demanda Total"]    = dem_total
+    df_dem["Saldo vs Demanda"] = df_dem[almox_dem2] - dem_total
+    df_dem["Cobertura %"]      = (df_dem[almox_dem2] / dem_total.replace(0, float("nan")) * 100).fillna(0).round(1)
+    df_dem["Status"]           = df_dem["Saldo vs Demanda"].apply(lambda x: "FALTA" if x < 0 else "OK")
+    if ap_dem:   df_dem = df_dem[df_dem["Demanda Total"] > 0]
+    if busca_d:  df_dem = df_dem[df_dem["Codigo"].astype(str).str.contains(busca_d, case=False, na=False) |
+                                   df_dem["Descricao"].astype(str).str.contains(busca_d, case=False, na=False)]
+    df_dem = df_dem.sort_values("Saldo vs Demanda")
+
+    n_falta_d = (df_dem["Status"]=="FALTA").sum()
+    st.markdown(f"""<div class="metric-row">
+      {metric_box("📦 Total", len(df_dem))}{metric_box("🔴 Falta", n_falta_d)}
+      {metric_box("Dem. Total", fmt_num(df_dem["Demanda Total"].sum()))}{metric_box("Saldo Total", fmt_num(df_dem[almox_dem2].sum()))}
+    </div>""", unsafe_allow_html=True)
+
+    def estilo_dem(row):
+        if row["Status"] == "FALTA": return ["background-color:#ffc7ce; color:#9c0006"] * len(row)
+        return ["background-color:#f0fff4; color:#14532d"] * len(row)
+
+    cols_dem = ["Codigo","Descricao", almox_dem2,"Demanda Pedido"]
+    if inc_op_d: cols_dem.append("Qtde Pendente OP")
+    if inc_ord_d and tem_ordens: cols_dem.append("Qtde Ordens Abertas")
+    cols_dem += ["Demanda Total","Saldo vs Demanda","Cobertura %","Status"]
+    cols_dem = [c for c in cols_dem if c in df_dem.columns]
+
+    st.markdown(f'<div style="font-size:10px;padding:4px 0"><b>{len(df_dem)}</b> item(ns)</div>', unsafe_allow_html=True)
+    st.dataframe(df_dem[cols_dem].style.apply(estilo_dem, axis=1), use_container_width=True, height=400)
+
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1: st.download_button("📥 CSV",   df_dem[cols_dem].to_csv(index=False).encode("utf-8"), "demandas.csv",  mime="text/csv", key="dl_dem_csv")
+    with col_dl2: st.download_button("📥 Excel", exportar_excel_formatado(df_dem[cols_dem]),             "demandas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_dem_xlsx")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ABA SUGESTÃO
+# ══════════════════════════════════════════════════════════════
+with tab_sugestao:
+    st.markdown('<div class="panel"><div class="panel-header">Sugestão de Produção</div>', unsafe_allow_html=True)
+
+    col_sg1, col_sg2, col_sg3 = st.columns([1.2, 0.8, 0.8])
+    with col_sg1:
+        idx_sug = opcoes_almox.index("Saldo Almox 3") if "Saldo Almox 3" in opcoes_almox else 0
+        almox_sug = st.selectbox("Almox de referência", opcoes_almox, index=idx_sug, key="sug_almox")
+    with col_sg2: inc_ord_sug = st.checkbox("+ Ordens no saldo",       value=True, key="sug_ordens") if tem_ordens else False
+    with col_sg3: inc_estq_sug= st.checkbox("+ Est.Seg na sugestão",   value=True, key="sug_estq")   if tem_parametros else False
+
+    almox_s_sug = opcoes_almox[-1] if not any("30" in x for x in opcoes_almox) else next(x for x in opcoes_almox if "30" in x)
+    saldo_sug = df_full[almox_sug].copy()
+    if inc_ord_sug and tem_ordens: saldo_sug = saldo_sug + df_full["Qtde Ordens Abertas"]
+    df_sug = df_full.copy()
+    df_sug["Saldo Real"]   = saldo_sug - df_sug["Demanda Pedido"] - df_sug["Qtde Pendente OP"]
+    df_sug["Abaixo Estq Seg"] = df_sug[almox_sug] < df_sug["Estq Seg"]
+    df_sug["Status"]       = df_sug.apply(lambda r: calc_status(r, almox_sug, almox_s_sug, inc_ord_sug), axis=1)
+    df_sug_filt = df_sug[df_sug["Status"].isin(["FALTA","RISCO"])].copy()
+
+    if not df_sug_filt.empty:
+        df_sug_filt["Qtde Sugerida"] = df_sug_filt.apply(
+            lambda r: max(r["Demanda Pedido"] + r["Qtde Pendente OP"] - r[almox_sug]
+                          + (r["Estq Seg"] if inc_estq_sug and tem_parametros else 0), 0), axis=1)
+        df_sug_filt = df_sug_filt[df_sug_filt["Qtde Sugerida"] > 0].sort_values(
+            by=["Status","Qtde Sugerida"], ascending=[True, False])
+
+        n_urgente = (df_sug_filt["Status"]=="FALTA").sum()
+        n_atencao = (df_sug_filt["Status"]=="RISCO").sum()
+
+        st.markdown(f"""<div class="metric-row">
+          {metric_box("🔴 Urgente", n_urgente)}{metric_box("🟡 Atenção", n_atencao)}{metric_box("Total", len(df_sug_filt))}
+        </div>""", unsafe_allow_html=True)
+
+        # Lista de itens sugeridos
+        sug_items_html = f'<div class="panel-header" style="text-align:left;padding:4px 8px">📋 {len(df_sug_filt)} ITEM(NS) PRECISAM SER PRODUZIDOS</div>'
+        for _, row in df_sug_filt.head(15).iterrows():
+            cls   = "sug-item-falta" if row["Status"]=="FALTA" else "sug-item-risco"
+            emoji = "🔴" if row["Status"]=="FALTA" else "🟡"
+            sug_items_html += f"""<div class="sug-item {cls}">
+              <div>
+                <div class="sug-cod">{emoji} {row['Codigo']}</div>
+                <div style="font-size:8.5px;color:#555">{str(row['Descricao'])[:45]}</div>
+              </div>
+              <div class="sug-qtd">Prod: {fmt_num(row['Qtde Sugerida'])}</div>
+            </div>"""
+        if len(df_sug_filt) > 15:
+            sug_items_html += f'<div style="font-size:9px;color:#777;padding:4px 8px">+ {len(df_sug_filt)-15} outros (veja o Excel)</div>'
+        st.markdown(f'<div style="border:1px solid #aaa;margin-bottom:6px">{sug_items_html}</div>', unsafe_allow_html=True)
+
+        with st.expander("📄 Ver tabela completa", expanded=False):
+            cols_sug_t = [c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Estq Seg","Qtde Sugerida","Status"] if c in df_sug_filt.columns]
+            st.dataframe(df_sug_filt[cols_sug_t].style.apply(estilo_linha, axis=1), use_container_width=True)
+
+        df_down_sug = df_sug_filt[[c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Estq Seg","Qtde Sugerida","Status"] if c in df_sug_filt.columns]].copy()
+        st.download_button("📥 Baixar Sugestão (Excel)", exportar_excel_formatado(df_down_sug), "sugestao_producao.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sugestao")
+    else:
+        st.markdown('<div class="msg-ok">✅ Nenhum item necessita produção. Todos os saldos estão adequados.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
