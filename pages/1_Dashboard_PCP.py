@@ -107,13 +107,11 @@ def limpar_selecao():
     st.session_state.item_descricao = ""
 
 def aplicar_filtro_cruzado(df):
-    """Aplica filtro de item selecionado se houver."""
     if st.session_state.item_selecionado:
         return df[df["Codigo"].astype(str) == str(st.session_state.item_selecionado)]
     return df
 
 def capturar_selecao(evento, df_reset, col_cod="Codigo", col_desc="Descricao"):
-    """Captura clique numa linha do dataframe e atualiza session_state."""
     linhas = evento.selection.rows if hasattr(evento, "selection") else []
     if linhas and linhas[0] < len(df_reset):
         novo_cod = str(df_reset.iloc[linhas[0]][col_cod])
@@ -196,16 +194,35 @@ except Exception:
     st.markdown('<div class="msg-warn">⚠️ Faça upload dos dados na página principal primeiro.</div>', unsafe_allow_html=True)
     st.stop()
 
+# ── ORDENS — usa Qtde. Pendente como quantidade ───────────────
 tem_ordens = False
 ordens_abertas = pd.DataFrame()
 try:
     ordens_raw = pd.read_csv("ordens.csv")
     cu = {c: c.upper().strip() for c in ordens_raw.columns}
     col_cod_o = col_qtd_o = col_st_o = None
+
+    # Detecta coluna de código
     for orig, upper in cu.items():
-        if any(k in upper for k in ["COD","ITEM","PRODUTO","CODIGO","CÓDIGO"]) and col_cod_o is None: col_cod_o = orig
-        if any(k in upper for k in ["QTDE","QTD","QUANTIDADE","SALDO","SALDO ORDEM"]) and col_qtd_o is None: col_qtd_o = orig
-        if any(k in upper for k in ["STATUS","SITUAÇÃO","SITUACAO","SIT"]) and col_st_o is None: col_st_o = orig
+        if any(k in upper for k in ["COD","ITEM","PRODUTO","CODIGO","CÓDIGO"]) and col_cod_o is None:
+            col_cod_o = orig
+
+    # 1ª passagem: prioriza coluna de quantidade PENDENTE
+    for orig, upper in cu.items():
+        if any(k in upper for k in ["PENDENTE","SALDO ORDEM","SALDO PEND","QTD PEND","QTDE PEND"]) and col_qtd_o is None:
+            col_qtd_o = orig
+
+    # 2ª passagem: fallback para colunas genéricas
+    if col_qtd_o is None:
+        for orig, upper in cu.items():
+            if any(k in upper for k in ["SALDO","QTDE","QTD","QUANTIDADE"]) and col_qtd_o is None:
+                col_qtd_o = orig
+
+    # Detecta coluna de status (inclui "SITUA" para pegar "Situao")
+    for orig, upper in cu.items():
+        if any(k in upper for k in ["STATUS","SITUAÇÃO","SITUACAO","SITUA","SIT"]) and col_st_o is None:
+            col_st_o = orig
+
     if col_cod_o and col_qtd_o:
         cols = [col_cod_o, col_qtd_o] + ([col_st_o] if col_st_o else [])
         df_ord = ordens_raw[cols].copy()
@@ -291,7 +308,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── BARRA DE FILTRO GLOBAL (aparece em todas as abas) ────────
+# ── BARRA DE FILTRO GLOBAL ────────────────────────────────────
 cod_sel = st.session_state.item_selecionado
 if cod_sel:
     desc_sel = st.session_state.item_descricao
@@ -363,7 +380,6 @@ with tab_dash:
     n_risco = (rows_dash["Status"] == "RISCO").sum()
     n_ok    = (rows_dash["Status"] == "OK").sum()
 
-    # Cards resumo
     st.markdown('<div class="panel"><div class="panel-header">Resumo de Status</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="status-cards">
@@ -402,7 +418,6 @@ with tab_dash:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_r1:
-        # Saldo x Pedidos — filtra pelo item selecionado se houver
         df_chart = aplicar_filtro_cruzado(rows_dash) if cod_sel else rows_dash
         sample   = df_chart.head(12)
         st.markdown('<div class="panel"><div class="panel-header">Saldo x Pedidos</div>', unsafe_allow_html=True)
@@ -425,7 +440,6 @@ with tab_dash:
         """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Previsão mês
         st.markdown('<div class="panel"><div class="panel-header">Previsão mês</div>', unsafe_allow_html=True)
         prev_df = previsao if not cod_sel else previsao[previsao["COD"].astype(str) == str(cod_sel)]
         prev_rows_html = "".join(f'<tr><td><b>{r["COD"]}</b></td><td style="text-align:right;font-size:9px">{str(r["PRODUTO"])[:20]}</td></tr>'
@@ -438,7 +452,6 @@ with tab_dash:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_r2:
-        # Pedidos por data
         st.markdown('<div class="panel"><div class="panel-header">Pedidos por data</div>', unsafe_allow_html=True)
         ped_df = perfil[perfil["Tipo"]=="DC"]
         if cod_sel: ped_df = ped_df[ped_df["Item"].astype(str) == str(cod_sel)]
@@ -453,7 +466,6 @@ with tab_dash:
           </tr></thead><tbody>{ped_rows_html}</tbody></table></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Sugestão mini
         st.markdown('<div class="panel"><div class="panel-header">Sugestão de Produção</div>', unsafe_allow_html=True)
         df_sm = rows_dash[rows_dash["Status"].isin(["FALTA","RISCO"])].copy()
         if cod_sel: df_sm = df_sm[df_sm["Codigo"].astype(str) == str(cod_sel)]
@@ -497,7 +509,7 @@ with tab_filtros:
         - df_calc["Demanda Pedido"] - df_calc["Qtde Pendente OP"])
     df_calc["Status"] = df_calc.apply(lambda r: calc_status(r, almox_dem, almox_seg, usar_ord_flt), axis=1)
 
-    df_calc = aplicar_filtro_cruzado(df_calc)   # ← filtro cruzado
+    df_calc = aplicar_filtro_cruzado(df_calc)
     if busca_flt: df_calc = df_calc[df_calc["Codigo"].astype(str).str.contains(busca_flt, case=False, na=False) | df_calc["Descricao"].astype(str).str.contains(busca_flt, case=False, na=False)]
     if flt_st != "Todos": df_calc = df_calc[df_calc["Status"] == flt_st]
 
@@ -548,7 +560,7 @@ with tab_estoques:
         df_estq["Diferença"]     = df_estq["Saldo Efetivo"] - df_estq["Estq Seg"]
         df_estq["Status"]        = df_estq["Diferença"].apply(lambda x: "ABAIXO" if x < 0 else "OK")
 
-        df_estq = aplicar_filtro_cruzado(df_estq)   # ← filtro cruzado
+        df_estq = aplicar_filtro_cruzado(df_estq)
         if apenas_ab: df_estq = df_estq[df_estq["Status"] == "ABAIXO"]
         if busca_e:   df_estq = df_estq[df_estq["Codigo"].astype(str).str.contains(busca_e, case=False, na=False) | df_estq["Descricao"].astype(str).str.contains(busca_e, case=False, na=False)]
         df_estq = df_estq.sort_values("Diferença")
@@ -598,7 +610,7 @@ with tab_demandas:
     df_dem["Cobertura %"]      = (df_dem[almox_dem2] / dem_t.replace(0, float("nan")) * 100).fillna(0).round(1)
     df_dem["Status"]           = df_dem["Saldo vs Demanda"].apply(lambda x: "FALTA" if x < 0 else "OK")
 
-    df_dem = aplicar_filtro_cruzado(df_dem)   # ← filtro cruzado
+    df_dem = aplicar_filtro_cruzado(df_dem)
     if ap_dem:  df_dem = df_dem[df_dem["Demanda Total"] > 0]
     if busca_d: df_dem = df_dem[df_dem["Codigo"].astype(str).str.contains(busca_d, case=False, na=False) | df_dem["Descricao"].astype(str).str.contains(busca_d, case=False, na=False)]
     df_dem = df_dem.sort_values("Saldo vs Demanda")
@@ -650,7 +662,7 @@ with tab_sugestao:
     df_sug["Status"]          = df_sug.apply(lambda r: calc_status(r, almox_sug, almox_ss, inc_ord_s), axis=1)
     df_sf = df_sug[df_sug["Status"].isin(["FALTA","RISCO"])].copy()
 
-    df_sf = aplicar_filtro_cruzado(df_sf)   # ← filtro cruzado
+    df_sf = aplicar_filtro_cruzado(df_sf)
 
     if not df_sf.empty:
         df_sf["Qtde Sugerida"] = df_sf.apply(
