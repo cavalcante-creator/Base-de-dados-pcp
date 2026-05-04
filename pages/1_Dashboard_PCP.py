@@ -26,7 +26,7 @@ html, body, [class*="css"] { font-family: 'Segoe UI', Tahoma, sans-serif; font-s
 .pcp-date-label { font-size: 9px; color: #555; margin-bottom: 2px; border-bottom: 1px solid #aaa; padding-bottom: 1px; }
 .pcp-date-val { font-size: 11px; font-weight: 700; color: #1a1a2e; padding: 2px 0; }
 
-/* FILTRO ATIVO — barra de contexto estilo Power BI */
+/* FILTRO ATIVO */
 .filtro-ativo-bar { display: flex; align-items: center; gap: 12px; background: linear-gradient(90deg, #1a3a5c 0%, #1d4fa0 100%); border: 1px solid #0d2740; border-radius: 3px; padding: 6px 14px; margin-bottom: 6px; color: white; }
 .filtro-ativo-label { font-size: 9px; opacity: .75; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
 .filtro-ativo-cod { font-size: 15px; font-weight: 800; letter-spacing: .5px; }
@@ -95,7 +95,7 @@ div.stTextInput > div > input { border-radius: 2px !important; border: 1px solid
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
-# SESSION STATE — seleção cruzada entre abas
+# SESSION STATE
 # ══════════════════════════════════════════════════════════════
 if "item_selecionado" not in st.session_state:
     st.session_state.item_selecionado = None
@@ -202,7 +202,6 @@ try:
     cu = {c: c.upper().strip() for c in ordens_raw.columns}
     col_cod_o = col_qtd_o = col_st_o = None
 
-    # Detecta coluna de código
     for orig, upper in cu.items():
         if any(k in upper for k in ["COD","ITEM","PRODUTO","CODIGO","CÓDIGO"]) and col_cod_o is None:
             col_cod_o = orig
@@ -469,7 +468,12 @@ with tab_dash:
         st.markdown('<div class="panel"><div class="panel-header">Sugestão de Produção</div>', unsafe_allow_html=True)
         df_sm = rows_dash[rows_dash["Status"].isin(["FALTA","RISCO"])].copy()
         if cod_sel: df_sm = df_sm[df_sm["Codigo"].astype(str) == str(cod_sel)]
-        df_sm["QtdSug"] = df_sm.apply(lambda r: max(r["Demanda Pedido"]+r["Qtde Pendente OP"]-r.get(almox_d,0)+r["Estq Seg"],0), axis=1)
+        df_sm["QtdSug"] = df_sm.apply(
+            lambda r: max(
+                r["Demanda Pedido"] + r["Qtde Pendente OP"]
+                - r.get(almox_d, 0)
+                - (r["Qtde Ordens Abertas"] if tem_ordens else 0)
+                + r["Estq Seg"], 0), axis=1)
         df_sm = df_sm[df_sm["QtdSug"] > 0].sort_values("QtdSug", ascending=False)
         sug_rows_html = "".join(f'<tr><td><b>{r["Codigo"]}</b></td><td style="text-align:right">{fmt_num(r["QtdSug"])}</td><td style="color:#c0392b;font-weight:700;font-size:9px">Produzir</td></tr>'
                                   for _, r in df_sm.head(12).iterrows()) or '<tr><td colspan="3" style="color:#27ae60;text-align:center">OK</td></tr>'
@@ -665,9 +669,15 @@ with tab_sugestao:
     df_sf = aplicar_filtro_cruzado(df_sf)
 
     if not df_sf.empty:
+        # ── Qtde Sugerida descontando ordens pendentes ──────────
         df_sf["Qtde Sugerida"] = df_sf.apply(
-            lambda r: max(r["Demanda Pedido"]+r["Qtde Pendente OP"]-r[almox_sug]
-                          +(r["Estq Seg"] if inc_estq_s and tem_parametros else 0), 0), axis=1)
+            lambda r: max(
+                r["Demanda Pedido"]
+                + r["Qtde Pendente OP"]
+                - r[almox_sug]
+                - (r["Qtde Ordens Abertas"] if inc_ord_s and tem_ordens else 0)
+                + (r["Estq Seg"] if inc_estq_s and tem_parametros else 0),
+                0), axis=1)
         df_sf = df_sf[df_sf["Qtde Sugerida"] > 0].sort_values(["Status","Qtde Sugerida"], ascending=[True,False])
 
         n_urg = (df_sf["Status"]=="FALTA").sum(); n_at = (df_sf["Status"]=="RISCO").sum()
@@ -689,7 +699,7 @@ with tab_sugestao:
         st.markdown(f'<div style="border:1px solid #aaa;margin-bottom:6px">{sug_html}</div>', unsafe_allow_html=True)
 
         with st.expander("📄 Ver tabela completa", expanded=False):
-            cols_st = [c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Estq Seg","Qtde Sugerida","Status"] if c in df_sf.columns]
+            cols_st = [c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Qtde Ordens Abertas","Estq Seg","Qtde Sugerida","Status"] if c in df_sf.columns]
             df_sf_show = df_sf[cols_st].reset_index(drop=True)
             ev_s = st.dataframe(
                 df_sf_show.style.apply(estilo_linha, axis=1),
@@ -698,7 +708,7 @@ with tab_sugestao:
             )
             capturar_selecao(ev_s, df_sf_show)
 
-        cols_dl = [c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Estq Seg","Qtde Sugerida","Status"] if c in df_sf.columns]
+        cols_dl = [c for c in ["Codigo","Descricao", almox_sug,"Demanda Pedido","Qtde Pendente OP","Qtde Ordens Abertas","Estq Seg","Qtde Sugerida","Status"] if c in df_sf.columns]
         st.download_button("📥 Baixar Sugestão (Excel)", exportar_excel_formatado(df_sf[cols_dl]),
                            "sugestao_producao.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
